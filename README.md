@@ -6,10 +6,10 @@
 
 An experimental, open-source, decoy-assisted and authenticated data transmission protocol, written in Rust.
 
-[![CI](https://github.com/amalrn98/PathGaurd/actions/workflows/ci.yml/badge.svg)](https://github.com/amalrn98/PathGaurd/actions/workflows/ci.yml)
+[![CI](https://github.com/amalrn98/PathGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/amalrn98/PathGuard/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status: research prototype](https://img.shields.io/badge/status-research%20prototype-orange)
-![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-informational)
+![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-informational)
 
 </div>
 
@@ -58,11 +58,11 @@ Every mechanism is optional and switchable in a [policy file](policies/).
 
 ## Try it
 
-You need Rust 1.85 or newer.
+You need Rust 1.88 or newer.
 
 ```bash
-git clone https://github.com/amalrn98/PathGaurd.git
-cd PathGaurd
+git clone https://github.com/amalrn98/PathGuard.git
+cd PathGuard
 cargo run --release -- matrix
 ```
 

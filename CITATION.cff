@@ -5,7 +5,7 @@ type: software
 authors:
   - family-names: Nair
     given-names: Amal
-repository-code: "https://github.com/amalrn98/PathGaurd"
+repository-code: "https://github.com/amalrn98/PathGuard"
 license: Apache-2.0
 version: 0.1.0
 keywords:

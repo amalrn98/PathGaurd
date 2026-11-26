@@ -14,7 +14,7 @@ use crate::policy::Policy;
 use crate::receiver::Receiver;
 use crate::sender::{SendError, SendReport, Sender};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -104,7 +104,7 @@ impl Path for SimPath {
         if tag == Some(TAG_PROBE) {
             self.probe_msgs += 1;
         }
-        let jitter = 1.0 + self.rng.gen_range(-0.05..0.05);
+        let jitter = 1.0 + self.rng.random_range(-0.05..0.05);
         let mut rtt_ms = self.base_ms * jitter;
         let mut forwarded = req.to_vec();
         match &self.behavior {
