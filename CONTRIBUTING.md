@@ -57,3 +57,7 @@ Short imperative summary line, then a body that explains why. Reference issues w
 ## Reporting vulnerabilities
 
 Do not file them as issues. See [SECURITY.md](SECURITY.md).
+
+## Questions
+
+Open a discussion or issue, or message the maintainer on Discord at **@mythicavalon**.

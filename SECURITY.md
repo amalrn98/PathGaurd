@@ -7,6 +7,7 @@ PathGuard is an **unaudited research prototype**. It is not suitable for protect
 Please report privately. Do not open a public issue for a vulnerability.
 
 * Use GitHub's private reporting: open the **Security** tab of this repository and choose **Report a vulnerability**.
+* If that is unavailable, message the maintainer on Discord at **@mythicavalon** and ask for a private channel. Do not post vulnerability details in public servers or channels.
 * Include: affected version or commit, a description, impact, and steps or a test that reproduces it.
 
 You will get an acknowledgement within 7 days. This is a volunteer project with no bounty program. Reporters are credited in the changelog unless they prefer otherwise.

@@ -190,7 +190,7 @@ policies/        example policies
 
 ## Contributing
 
-Contributions are welcome, especially adversarial ones: new attack scenarios, protocol review, and real-network measurements. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go through [SECURITY.md](SECURITY.md). Everyone is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Contributions are welcome, especially adversarial ones: new attack scenarios, protocol review, and real-network measurements. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go through [SECURITY.md](SECURITY.md). Everyone is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md). You can reach the maintainer on Discord at **@mythicavalon**.
 
 ## License
 
