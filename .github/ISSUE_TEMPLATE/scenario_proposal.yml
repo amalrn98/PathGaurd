@@ -1,0 +1,22 @@
+name: Attack or scenario proposal
+description: Propose a new adversary, network condition or protocol weakness to model
+labels: [research, scenario]
+body:
+  - type: textarea
+    id: attacker
+    attributes:
+      label: Attacker capability
+      description: What can the attacker see and do?
+    validations:
+      required: true
+  - type: textarea
+    id: expect
+    attributes:
+      label: What should PathGuard do
+      description: Detect, withhold, deliver anyway, or is it out of scope? Why?
+    validations:
+      required: true
+  - type: textarea
+    id: refs
+    attributes:
+      label: References

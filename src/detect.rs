@@ -78,7 +78,20 @@ impl fmt::Display for Finding {
 
 /// Sum of finding weights.
 pub fn score<'a>(findings: impl IntoIterator<Item = &'a Finding>) -> f64 {
-    findings.into_iter().map(|f| f.severity.weight()).sum()
+    findings.into_iter().fold(0.0, |acc, f| acc + f.severity.weight())
+}
+
+/// Collapse repeated findings of the same kind on the same path, keeping the
+/// first occurrence and a count. Order of first appearance is preserved.
+pub fn summarize<'a>(findings: impl IntoIterator<Item = &'a Finding>) -> Vec<(&'a Finding, usize)> {
+    let mut out: Vec<(&Finding, usize)> = Vec::new();
+    for f in findings {
+        match out.iter_mut().find(|(g, _)| g.kind == f.kind && g.path == f.path) {
+            Some((_, n)) => *n += 1,
+            None => out.push((f, 1)),
+        }
+    }
+    out
 }
 
 #[derive(Default)]
@@ -141,6 +154,23 @@ mod tests {
         assert!(d.observe_rtt("p", ms(21.0)).is_none());
         assert!(d.observe_rtt("p", ms(19.5)).is_none());
         assert!(d.observe_rtt("p", ms(80.0)).is_some());
+    }
+
+    #[test]
+    fn summarize_groups_repeats() {
+        let f = vec![
+            Finding::new(FindingKind::NoReply, Severity::Medium, "p", "a"),
+            Finding::new(FindingKind::NoReply, Severity::Medium, "p", "b"),
+            Finding::new(FindingKind::NoReply, Severity::Medium, "q", "c"),
+        ];
+        let s = summarize(&f);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0].1, 2);
+    }
+
+    #[test]
+    fn empty_score_is_positive_zero() {
+        assert!(score(&[]).is_sign_positive());
     }
 
     #[test]

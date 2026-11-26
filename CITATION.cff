@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use PathGuard in research, please cite it as below."
+title: "PathGuard: A Decoy-Assisted, Authenticated Data Transmission Protocol (research prototype)"
+type: software
+authors:
+  - family-names: Nair
+    given-names: Amal
+repository-code: "https://github.com/amalrn98/PathGaurd"
+license: Apache-2.0
+version: 0.1.0
+keywords:
+  - network security
+  - interception detection
+  - deception
+  - canary tokens
+  - multi-path verification

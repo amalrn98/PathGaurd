@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or goal
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed approach
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: Does this touch the handshake, key schedule, decision rules or parsing?

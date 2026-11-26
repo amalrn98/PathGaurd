@@ -7,7 +7,7 @@
 
 use crate::canary::{CanaryIssuer, Honeypot};
 use crate::crypto::{self, derive_session_keys, sha256, Ephemeral, Identity, PublicIdentity, SessionKeys};
-use crate::detect::{score, Detector, Finding, FindingKind, Severity};
+use crate::detect::{score, summarize, Detector, Finding, FindingKind, Severity};
 use crate::handshake::{ack_input, hello_input, transcript};
 use crate::message::{Message, ProbeId, ProbeKind, SessionId};
 use crate::multipath::min_pairwise_diversity;
@@ -103,8 +103,12 @@ impl SendReport {
         if let Some(d) = self.diversity {
             s.push_str(&format!("  min pairwise path diversity: {d:.2}\n"));
         }
-        for f in &self.findings {
-            s.push_str(&format!("  finding {f}\n"));
+        for (f, n) in summarize(&self.findings) {
+            if n > 1 {
+                s.push_str(&format!("  finding (x{n}) {f}\n"));
+            } else {
+                s.push_str(&format!("  finding {f}\n"));
+            }
         }
         for r in &self.reasons {
             s.push_str(&format!("  withheld because: {r}\n"));
@@ -445,10 +449,11 @@ impl Sender {
         }
         let excluded: HashSet<&str> = reports.iter().filter(|r| r.excluded).map(|r| r.path.as_str()).collect();
         let relevant: Vec<&Finding> = findings.iter().filter(|f| !excluded.contains(f.path.as_str())).collect();
-        let mut reasons: Vec<String> = relevant
-            .iter()
-            .filter(|f| f.severity == Severity::Critical)
-            .map(|f| format!("critical finding: {f}"))
+        let mut reasons: Vec<String> = summarize(relevant.iter().copied().filter(|f| f.severity == Severity::Critical))
+            .into_iter()
+            .map(
+                |(f, n)| if n > 1 { format!("critical finding (x{n}): {f}") } else { format!("critical finding: {f}") },
+            )
             .collect();
         let sc = score(relevant.iter().copied());
         let any_critical = !reasons.is_empty();

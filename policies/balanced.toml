@@ -1,0 +1,21 @@
+name = "balanced"
+
+[mechanisms]
+interception_detection = true
+active_decoys = false
+multipath = false
+payload_like_decoys = false
+canary = true
+
+[verification]
+probes_per_path = 3
+min_verified_paths = 1
+min_path_diversity = 0.5
+max_suspicion_score = 1.0
+max_rtt_zscore = 4.0
+payload_like_len = 256
+tolerate_failed_secondary_paths = false
+
+[failure]
+max_retries = 2
+close_session_on_failure = true
