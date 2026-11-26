@@ -237,12 +237,9 @@ impl Message {
                 recipient: r.array()?,
                 sig: r.array()?,
             },
-            TAG_HELLO_ACK => Message::HelloAck {
-                session_id: r.array()?,
-                recv_eph: r.array()?,
-                recv_id: r.array()?,
-                sig: r.array()?,
-            },
+            TAG_HELLO_ACK => {
+                Message::HelloAck { session_id: r.array()?, recv_eph: r.array()?, recv_id: r.array()?, sig: r.array()? }
+            }
             TAG_PROBE => Message::Probe {
                 session_id: r.array()?,
                 probe_id: r.array()?,
@@ -251,29 +248,13 @@ impl Message {
                 body: r.bytes()?,
                 mac: r.array()?,
             },
-            TAG_PROBE_REPLY => Message::ProbeReply {
-                session_id: r.array()?,
-                probe_id: r.array()?,
-                seq: r.u64()?,
-                mac: r.array()?,
-            },
-            TAG_PAYLOAD => Message::Payload {
-                session_id: r.array()?,
-                seq: r.u64()?,
-                ciphertext: r.bytes()?,
-            },
-            TAG_PAYLOAD_ACK => Message::PayloadAck {
-                session_id: r.array()?,
-                seq: r.u64()?,
-                mac: r.array()?,
-            },
-            TAG_CLOSE => Message::Close {
-                session_id: r.array()?,
-                mac: r.array()?,
-            },
-            TAG_REJECT => Message::Reject {
-                code: RejectCode::from_u8(r.u8()?)?,
-            },
+            TAG_PROBE_REPLY => {
+                Message::ProbeReply { session_id: r.array()?, probe_id: r.array()?, seq: r.u64()?, mac: r.array()? }
+            }
+            TAG_PAYLOAD => Message::Payload { session_id: r.array()?, seq: r.u64()?, ciphertext: r.bytes()? },
+            TAG_PAYLOAD_ACK => Message::PayloadAck { session_id: r.array()?, seq: r.u64()?, mac: r.array()? },
+            TAG_CLOSE => Message::Close { session_id: r.array()?, mac: r.array()? },
+            TAG_REJECT => Message::Reject { code: RejectCode::from_u8(r.u8()?)? },
             _ => return Err(Error::Malformed("unknown message tag")),
         };
         r.finish()?;
@@ -288,9 +269,22 @@ mod tests {
     #[test]
     fn roundtrip_all() {
         let msgs = vec![
-            Message::Hello { session_id: [1; 16], sender_eph: [2; 32], sender_id: [3; 32], recipient: [4; 32], sig: [5; 64] },
+            Message::Hello {
+                session_id: [1; 16],
+                sender_eph: [2; 32],
+                sender_id: [3; 32],
+                recipient: [4; 32],
+                sig: [5; 64],
+            },
             Message::HelloAck { session_id: [1; 16], recv_eph: [2; 32], recv_id: [3; 32], sig: [5; 64] },
-            Message::Probe { session_id: [1; 16], probe_id: [2; 16], kind: ProbeKind::Bait, seq: 9, body: vec![1, 2, 3], mac: [7; 32] },
+            Message::Probe {
+                session_id: [1; 16],
+                probe_id: [2; 16],
+                kind: ProbeKind::Bait,
+                seq: 9,
+                body: vec![1, 2, 3],
+                mac: [7; 32],
+            },
             Message::ProbeReply { session_id: [1; 16], probe_id: [2; 16], seq: 9, mac: [7; 32] },
             Message::Payload { session_id: [1; 16], seq: 1, ciphertext: vec![9; 100] },
             Message::PayloadAck { session_id: [1; 16], seq: 1, mac: [7; 32] },

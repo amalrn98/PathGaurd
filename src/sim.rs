@@ -216,10 +216,7 @@ impl World {
     }
     /// True if any observed request contained `needle` in the clear.
     pub fn observed_in_clear(&self, needle: &[u8]) -> bool {
-        self.capture
-            .lock()
-            .map(|c| c.iter().any(|m| m.windows(needle.len()).any(|w| w == needle)))
-            .unwrap_or(false)
+        self.capture.lock().map(|c| c.iter().any(|m| m.windows(needle.len()).any(|w| w == needle))).unwrap_or(false)
     }
 }
 
@@ -245,8 +242,16 @@ fn three(w: &World, a: Behavior, b: Behavior, c: Behavior) -> Vec<Box<dyn Path>>
 pub fn scenarios() -> Vec<Scenario> {
     use Behavior::*;
     vec![
-        Scenario { name: "honest", description: "three clean, independent paths", build: |w| three(w, Honest, Honest, Honest) },
-        Scenario { name: "lossy-link", description: "primary loses its first probe (benign packet loss)", build: |w| three(w, DropProbes { first: 1 }, Honest, Honest) },
+        Scenario {
+            name: "honest",
+            description: "three clean, independent paths",
+            build: |w| three(w, Honest, Honest, Honest),
+        },
+        Scenario {
+            name: "lossy-link",
+            description: "primary loses its first probe (benign packet loss)",
+            build: |w| three(w, DropProbes { first: 1 }, Honest, Honest),
+        },
         Scenario {
             name: "latency-spike",
             description: "primary latency jumps 4x mid-verification",
@@ -265,12 +270,36 @@ pub fn scenarios() -> Vec<Scenario> {
             description: "attacker impersonates the receiver on the primary path only",
             build: |w| three(w, Impersonate(Arc::new(Identity::generate())), Honest, Honest),
         },
-        Scenario { name: "tamper-primary", description: "primary path modifies probes and payload in transit", build: |w| three(w, TamperProbes, Honest, Honest) },
-        Scenario { name: "tamper-secondary", description: "a secondary path modifies probes; primary is clean", build: |w| three(w, Honest, TamperProbes, Honest) },
-        Scenario { name: "forged-replies", description: "primary corrupts replies on the way back", build: |w| three(w, TamperResponses, Honest, Honest) },
-        Scenario { name: "duplicate-replies", description: "primary duplicates every probe reply", build: |w| three(w, DuplicateReplies, Honest, Honest) },
-        Scenario { name: "snooping-primary", description: "primary reads plaintext bait and touches its canary tokens", build: |w| three(w, Snoop, Honest, Honest) },
-        Scenario { name: "snooping-secondary", description: "a secondary path touches canary tokens it sees", build: |w| three(w, Honest, Snoop, Honest) },
+        Scenario {
+            name: "tamper-primary",
+            description: "primary path modifies probes and payload in transit",
+            build: |w| three(w, TamperProbes, Honest, Honest),
+        },
+        Scenario {
+            name: "tamper-secondary",
+            description: "a secondary path modifies probes; primary is clean",
+            build: |w| three(w, Honest, TamperProbes, Honest),
+        },
+        Scenario {
+            name: "forged-replies",
+            description: "primary corrupts replies on the way back",
+            build: |w| three(w, TamperResponses, Honest, Honest),
+        },
+        Scenario {
+            name: "duplicate-replies",
+            description: "primary duplicates every probe reply",
+            build: |w| three(w, DuplicateReplies, Honest, Honest),
+        },
+        Scenario {
+            name: "snooping-primary",
+            description: "primary reads plaintext bait and touches its canary tokens",
+            build: |w| three(w, Snoop, Honest, Honest),
+        },
+        Scenario {
+            name: "snooping-secondary",
+            description: "a secondary path touches canary tokens it sees",
+            build: |w| three(w, Honest, Snoop, Honest),
+        },
         Scenario {
             name: "passive-relay",
             description: "attacker relays every message verbatim (cannot be told apart)",

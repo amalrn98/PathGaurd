@@ -54,10 +54,7 @@ impl<'a> Reader<'a> {
     }
 
     fn take(&mut self, n: usize) -> Result<&'a [u8]> {
-        let end = self
-            .pos
-            .checked_add(n)
-            .ok_or(Error::Malformed("length overflow"))?;
+        let end = self.pos.checked_add(n).ok_or(Error::Malformed("length overflow"))?;
         if end > self.buf.len() {
             return Err(Error::Malformed("truncated"));
         }

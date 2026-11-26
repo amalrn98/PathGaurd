@@ -23,12 +23,7 @@ pub fn hello_input(
 }
 
 /// Bytes signed by the receiver in the hello acknowledgement.
-pub fn ack_input(
-    hello_digest: &[u8; 32],
-    session_id: &[u8; 16],
-    recv_eph: &[u8; 32],
-    recv_id: &[u8; 32],
-) -> Vec<u8> {
+pub fn ack_input(hello_digest: &[u8; 32], session_id: &[u8; 16], recv_eph: &[u8; 32], recv_id: &[u8; 32]) -> Vec<u8> {
     let mut v = b"pathguard/v1/ack".to_vec();
     v.extend_from_slice(hello_digest);
     v.extend_from_slice(session_id);

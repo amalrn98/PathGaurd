@@ -257,7 +257,8 @@ impl Sender {
         let me = self.identity.public().0;
         let hi = hello_input(&session_id, &eph_pub, &me, &self.recipient.0);
         let sig = self.identity.sign(&hi);
-        let req = Message::Hello { session_id, sender_eph: eph_pub, sender_id: me, recipient: self.recipient.0, sig }.encode();
+        let req = Message::Hello { session_id, sender_eph: eph_pub, sender_id: me, recipient: self.recipient.0, sig }
+            .encode();
         let resp = path.exchange(&req).map_err(|e| format!("transport: {e}"))?;
         let first = resp.replies.first().ok_or_else(|| "no reply to hello".to_string())?;
         match Message::decode(first) {
@@ -286,7 +287,13 @@ impl Sender {
         }
     }
 
-    fn build_body(&self, kind: ProbeKind, session: &Session, probe_id: &ProbeId, issuer: &mut CanaryIssuer) -> (Vec<u8>, Vec<u8>) {
+    fn build_body(
+        &self,
+        kind: ProbeKind,
+        session: &Session,
+        probe_id: &ProbeId,
+        issuer: &mut CanaryIssuer,
+    ) -> (Vec<u8>, Vec<u8>) {
         match kind {
             ProbeKind::Interception => {
                 let mut s = format!("pgprobe:{}", util::hex(&util::random::<8>()));
@@ -299,7 +306,8 @@ impl Sender {
             }
             ProbeKind::Bait => {
                 let t = issuer.issue("bait");
-                let b = format!("svc-backup credentials: user=backup token={t} url=https://pg-honeypot.invalid/{t}").into_bytes();
+                let b = format!("svc-backup credentials: user=backup token={t} url=https://pg-honeypot.invalid/{t}")
+                    .into_bytes();
                 (b.clone(), b)
             }
             ProbeKind::PayloadLike => {
@@ -312,11 +320,23 @@ impl Sender {
         }
     }
 
-    fn check_reply(raw: &[u8], session: &Session, probe_id: &ProbeId, seq: u64, content: &[u8], pid: &str) -> Option<Finding> {
+    fn check_reply(
+        raw: &[u8],
+        session: &Session,
+        probe_id: &ProbeId,
+        seq: u64,
+        content: &[u8],
+        pid: &str,
+    ) -> Option<Finding> {
         match Message::decode(raw) {
             Ok(Message::ProbeReply { session_id, probe_id: rp, seq: rs, mac: tag }) => {
                 if session_id != session.id || rp != *probe_id || rs != seq {
-                    return Some(Finding::new(FindingKind::MalformedReply, Severity::Critical, pid, "reply answers a different probe or session"));
+                    return Some(Finding::new(
+                        FindingKind::MalformedReply,
+                        Severity::Critical,
+                        pid,
+                        "reply answers a different probe or session",
+                    ));
                 }
                 let expect = reply_mac(&session.keys.probe, &session.id, probe_id, seq, content);
                 if !util::ct_eq(&expect, &tag) {
@@ -339,7 +359,14 @@ impl Sender {
         }
     }
 
-    fn probe_path(&self, path: &mut dyn Path, session: &mut Session, kinds: &[ProbeKind], issuer: &mut CanaryIssuer, det: &mut Detector) -> (PathReport, Vec<Finding>) {
+    fn probe_path(
+        &self,
+        path: &mut dyn Path,
+        session: &mut Session,
+        kinds: &[ProbeKind],
+        issuer: &mut CanaryIssuer,
+        det: &mut Detector,
+    ) -> (PathReport, Vec<Finding>) {
         let pid = path.id().to_string();
         let intercept = self.policy.mechanisms.interception_detection;
         let (mut sent, mut ok) = (0u32, 0u32);
@@ -390,12 +417,25 @@ impl Sender {
         let critical = fs.iter().any(|f| f.severity == Severity::Critical);
         let mean = if rtts.is_empty() { 0.0 } else { rtts.iter().sum::<f64>() / rtts.len() as f64 };
         (
-            PathReport { path: pid, probes_sent: sent, probes_ok: ok, verified: sent > 0 && ok >= (sent + 1) / 2 && !critical, excluded: false, mean_rtt_ms: mean },
+            PathReport {
+                path: pid,
+                probes_sent: sent,
+                probes_ok: ok,
+                verified: sent > 0 && ok >= sent.div_ceil(2) && !critical,
+                excluded: false,
+                mean_rtt_ms: mean,
+            },
             fs,
         )
     }
 
-    fn decide(&self, primary_id: &str, reports: &mut [PathReport], hops: &[Vec<String>], findings: &[Finding]) -> Decision {
+    fn decide(
+        &self,
+        primary_id: &str,
+        reports: &mut [PathReport],
+        hops: &[Vec<String>],
+        findings: &[Finding],
+    ) -> Decision {
         let v = &self.policy.verification;
         let m = &self.policy.mechanisms;
         let tolerate = m.multipath && v.tolerate_failed_secondary_paths;
@@ -423,16 +463,24 @@ impl Sender {
                 }
             }
             if m.multipath {
-                let verified: Vec<usize> = (0..reports.len()).filter(|&i| reports[i].verified && !reports[i].excluded).collect();
+                let verified: Vec<usize> =
+                    (0..reports.len()).filter(|&i| reports[i].verified && !reports[i].excluded).collect();
                 if (verified.len() as u32) < v.min_verified_paths {
-                    reasons.push(format!("{} verified path(s), policy requires {}", verified.len(), v.min_verified_paths));
+                    reasons.push(format!(
+                        "{} verified path(s), policy requires {}",
+                        verified.len(),
+                        v.min_verified_paths
+                    ));
                 }
                 if verified.len() >= 2 {
                     let hs: Vec<&[String]> = verified.iter().map(|&i| hops[i].as_slice()).collect();
                     diversity = min_pairwise_diversity(&hs);
                     if let Some(d) = diversity {
                         if v.min_verified_paths >= 2 && d < v.min_path_diversity {
-                            reasons.push(format!("path diversity {d:.2} is below the required {:.2}", v.min_path_diversity));
+                            reasons.push(format!(
+                                "path diversity {d:.2} is below the required {:.2}",
+                                v.min_path_diversity
+                            ));
                         }
                     }
                 }
@@ -456,13 +504,25 @@ impl Sender {
             .into_iter()
             .filter_map(|hit| {
                 issuer.label_of(&hit.token).map(|label| {
-                    Finding::new(FindingKind::CanaryTriggered, Severity::Critical, "session", format!("{label} token touched by {}", hit.source))
+                    Finding::new(
+                        FindingKind::CanaryTriggered,
+                        Severity::Critical,
+                        "session",
+                        format!("{label} token touched by {}", hit.source),
+                    )
                 })
             })
             .collect()
     }
 
-    fn attempt(&self, payload: &[u8], paths: &mut [Box<dyn Path>], order: &[usize], det: &mut Detector, rep: &mut SendReport) -> AttemptResult {
+    fn attempt(
+        &self,
+        payload: &[u8],
+        paths: &mut [Box<dyn Path>],
+        order: &[usize],
+        det: &mut Detector,
+        rep: &mut SendReport,
+    ) -> AttemptResult {
         let n = rep.attempts;
         let primary = order[0];
         let primary_id = paths[primary].id().to_string();
@@ -487,7 +547,13 @@ impl Sender {
             let targets: Vec<usize> = if self.policy.mechanisms.multipath { order.to_vec() } else { vec![primary] };
             for pi in targets {
                 let (pr, fs) = self.probe_path(&mut *paths[pi], &mut session, &kinds, &mut issuer, det);
-                rep.log(format!("attempt {n}: probed '{}': {}/{} valid, {} finding(s)", pr.path, pr.probes_ok, pr.probes_sent, fs.len()));
+                rep.log(format!(
+                    "attempt {n}: probed '{}': {}/{} valid, {} finding(s)",
+                    pr.path,
+                    pr.probes_ok,
+                    pr.probes_sent,
+                    fs.len()
+                ));
                 hops.push(paths[pi].hops().to_vec());
                 reports.push(pr);
                 findings.extend(fs);
@@ -534,7 +600,9 @@ impl Sender {
                 .first()
                 .map(|raw| match Message::decode(raw) {
                     Ok(Message::PayloadAck { session_id, seq: s, mac: tag }) => {
-                        session_id == session.id && s == seq && util::ct_eq(&ack_mac(&session.keys.probe, &session.id, seq, &ct), &tag)
+                        session_id == session.id
+                            && s == seq
+                            && util::ct_eq(&ack_mac(&session.keys.probe, &session.id, seq, &ct), &tag)
                     }
                     _ => false,
                 })

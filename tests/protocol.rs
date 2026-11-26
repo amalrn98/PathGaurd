@@ -27,10 +27,7 @@ fn delivery_closes_the_session() {
 fn withheld_attempts_leave_no_receiver_sessions() {
     let w = World::new();
     let s = w.sender(Policy::paranoid());
-    let mut paths = vec![
-        w.honest_path("a", &["x", "dst"], 1),
-        w.honest_path("b", &["x", "dst"], 2),
-    ];
+    let mut paths = vec![w.honest_path("a", &["x", "dst"], 1), w.honest_path("b", &["x", "dst"], 2)];
     assert!(s.send(b"data", &mut paths).is_err());
     assert!(w.take_delivered().is_empty());
     assert_eq!(w.receiver_sessions(), 0);
@@ -44,7 +41,13 @@ fn hello_for_another_recipient_is_rejected() {
     let eph = crypto::Ephemeral::generate();
     let sid = [7u8; 16];
     let hi = pathguard::handshake::hello_input(&sid, &eph.public, &sender.public().0, &other.0);
-    let msg = Message::Hello { session_id: sid, sender_eph: eph.public, sender_id: sender.public().0, recipient: other.0, sig: sender.sign(&hi) };
+    let msg = Message::Hello {
+        session_id: sid,
+        sender_eph: eph.public,
+        sender_id: sender.public().0,
+        recipient: other.0,
+        sig: sender.sign(&hi),
+    };
     assert_eq!(reject(&recv.handle(&msg.encode())), Some(RejectCode::AuthFailed));
 }
 
@@ -54,7 +57,13 @@ fn forged_hello_signature_is_rejected() {
     let sender = Identity::generate();
     let eph = crypto::Ephemeral::generate();
     let sid = [7u8; 16];
-    let msg = Message::Hello { session_id: sid, sender_eph: eph.public, sender_id: sender.public().0, recipient: recv.public().0, sig: [0u8; 64] };
+    let msg = Message::Hello {
+        session_id: sid,
+        sender_eph: eph.public,
+        sender_id: sender.public().0,
+        recipient: recv.public().0,
+        sig: [0u8; 64],
+    };
     assert_eq!(reject(&recv.handle(&msg.encode())), Some(RejectCode::AuthFailed));
 }
 
@@ -66,7 +75,13 @@ fn unknown_sender_is_rejected_when_allow_list_is_set() {
     let eph = crypto::Ephemeral::generate();
     let sid = [1u8; 16];
     let hi = pathguard::handshake::hello_input(&sid, &eph.public, &stranger.public().0, &recv.public().0);
-    let msg = Message::Hello { session_id: sid, sender_eph: eph.public, sender_id: stranger.public().0, recipient: recv.public().0, sig: stranger.sign(&hi) };
+    let msg = Message::Hello {
+        session_id: sid,
+        sender_eph: eph.public,
+        sender_id: stranger.public().0,
+        recipient: recv.public().0,
+        sig: stranger.sign(&hi),
+    };
     assert_eq!(reject(&recv.handle(&msg.encode())), Some(RejectCode::AuthFailed));
 }
 

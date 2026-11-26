@@ -26,15 +26,11 @@ pub struct Identity {
 impl Identity {
     /// Generate a fresh identity from the OS CSPRNG.
     pub fn generate() -> Self {
-        Self {
-            signing: SigningKey::generate(&mut OsRng),
-        }
+        Self { signing: SigningKey::generate(&mut OsRng) }
     }
     /// Rebuild an identity from a 32 byte seed.
     pub fn from_seed(seed: [u8; 32]) -> Self {
-        Self {
-            signing: SigningKey::from_bytes(&seed),
-        }
+        Self { signing: SigningKey::from_bytes(&seed) }
     }
     /// The 32 byte seed. Treat as secret.
     pub fn seed_bytes(&self) -> [u8; 32] {
@@ -117,20 +113,11 @@ pub struct SessionKeys {
 /// Derive session keys from the DH output and the handshake transcript hash.
 pub fn derive_session_keys(shared: &[u8; 32], transcript: &[u8; 32]) -> SessionKeys {
     let hk = Hkdf::<Sha256>::new(Some(transcript), shared);
-    let mut k = SessionKeys {
-        payload: [0; 32],
-        probe: [0; 32],
-        decoy: [0; 32],
-        canary: [0; 32],
-    };
-    hk.expand(b"pathguard/v1/payload", &mut k.payload)
-        .expect("32 bytes is a valid HKDF output length");
-    hk.expand(b"pathguard/v1/probe", &mut k.probe)
-        .expect("32 bytes is a valid HKDF output length");
-    hk.expand(b"pathguard/v1/decoy", &mut k.decoy)
-        .expect("32 bytes is a valid HKDF output length");
-    hk.expand(b"pathguard/v1/canary", &mut k.canary)
-        .expect("32 bytes is a valid HKDF output length");
+    let mut k = SessionKeys { payload: [0; 32], probe: [0; 32], decoy: [0; 32], canary: [0; 32] };
+    hk.expand(b"pathguard/v1/payload", &mut k.payload).expect("32 bytes is a valid HKDF output length");
+    hk.expand(b"pathguard/v1/probe", &mut k.probe).expect("32 bytes is a valid HKDF output length");
+    hk.expand(b"pathguard/v1/decoy", &mut k.decoy).expect("32 bytes is a valid HKDF output length");
+    hk.expand(b"pathguard/v1/canary", &mut k.canary).expect("32 bytes is a valid HKDF output length");
     k
 }
 

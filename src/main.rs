@@ -45,7 +45,10 @@ fn cmd_demo(args: &[String]) -> Result<(), String> {
         .ok_or_else(|| format!("unknown scenario '{name}' (see `pathguard scenarios`)"))?;
     println!("scenario: {} ({})", scn.name, scn.description);
     let o = sim::run(&scn, &policy);
-    println!("result:   {} (receiver got payload: {}, plaintext visible on path: {})", o.status, o.delivered, o.plaintext_leaked);
+    println!(
+        "result:   {} (receiver got payload: {}, plaintext visible on path: {})",
+        o.status, o.delivered, o.plaintext_leaked
+    );
     if let Some(r) = &o.report {
         println!("{}", r.render());
     }

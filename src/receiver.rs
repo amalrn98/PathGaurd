@@ -3,7 +3,9 @@
 //! The receiver never panics on network input. Every malformed or
 //! unauthenticated request yields a `Reject`.
 
-use crate::crypto::{self, derive_session_keys, mac, mac_verify, sha256, Ephemeral, Identity, PublicIdentity, SessionKeys};
+use crate::crypto::{
+    self, derive_session_keys, mac, mac_verify, sha256, Ephemeral, Identity, PublicIdentity, SessionKeys,
+};
 use crate::handshake::{ack_input, hello_input, transcript};
 use crate::message::{Message, ProbeId, ProbeKind, RejectCode, SessionId};
 use std::collections::{HashMap, HashSet};
