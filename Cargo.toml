@@ -2,7 +2,7 @@
 name = "pathguard"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 description = "Experimental decoy-assisted, authenticated data transmission protocol: verify the path, then release the payload."
 license = "Apache-2.0"
 repository = "https://github.com/amalrn98/PathGaurd"
