@@ -13,3 +13,13 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Deterministic network simulator with 13 adversary and network scenarios.
 - `pathguard` CLI: `demo`, `scenarios`, `matrix`, `policy`, `keygen`.
 - Protocol specification, threat model, architecture, evaluation and roadmap documents.
+
+### Changed
+
+- Upgraded the cryptography and randomness stack together: `chacha20poly1305` 0.11, `hmac` 0.13, `hkdf` 0.13, `sha2` 0.11, `ed25519-dalek` 3, `x25519-dalek` 3, `rand` 0.10, `toml` 1.2.
+- Minimum supported Rust version raised from 1.85 to 1.88.
+- CI uses `actions/checkout@v7`.
+
+### Fixed
+
+- Repository URL typo (`PathGaurd`) in the README, `Cargo.toml`, `CITATION.cff`, `NOTICE`, `CONTRIBUTING.md` and issue template config.
