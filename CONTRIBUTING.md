@@ -11,11 +11,11 @@ By contributing you agree that your contribution is licensed under Apache-2.0 (s
 
 ## Setup
 
-You need Rust 1.85 or newer.
+You need Rust 1.88 or newer.
 
 ```bash
-git clone https://github.com/amalrn98/PathGaurd.git
-cd PathGaurd
+git clone https://github.com/amalrn98/PathGuard.git
+cd PathGuard
 cargo test
 cargo run -- matrix
 ```

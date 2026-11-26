@@ -1,7 +1,7 @@
 //! Small helpers: hex, randomness, constant-time comparison.
 
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use subtle::ConstantTimeEq;
 
 /// Lowercase hex encoding.
@@ -24,7 +24,7 @@ pub fn from_hex<const N: usize>(s: &str) -> Option<[u8; N]> {
 /// Fill a fixed-size array from the operating system CSPRNG.
 pub fn random<const N: usize>() -> [u8; N] {
     let mut a = [0u8; N];
-    OsRng.fill_bytes(&mut a);
+    SysRng.try_fill_bytes(&mut a).expect("operating system CSPRNG unavailable");
     a
 }
 

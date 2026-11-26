@@ -11,7 +11,7 @@ use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
-use rand::rngs::OsRng;
+use rand::rngs::SysRng;
 use sha2::{Digest, Sha256};
 use x25519_dalek::{EphemeralSecret, PublicKey};
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -26,7 +26,7 @@ pub struct Identity {
 impl Identity {
     /// Generate a fresh identity from the OS CSPRNG.
     pub fn generate() -> Self {
-        Self { signing: SigningKey::generate(&mut OsRng) }
+        Self { signing: SigningKey::from_bytes(&util::random::<32>()) }
     }
     /// Rebuild an identity from a 32 byte seed.
     pub fn from_seed(seed: [u8; 32]) -> Self {
@@ -83,7 +83,7 @@ pub struct Ephemeral {
 impl Ephemeral {
     /// Generate a fresh key pair.
     pub fn generate() -> Self {
-        let secret = EphemeralSecret::random_from_rng(OsRng);
+        let secret = EphemeralSecret::random_from_rng(&mut rand::rand_core::UnwrapErr(SysRng));
         let public = PublicKey::from(&secret).to_bytes();
         Self { secret, public }
     }
@@ -133,7 +133,7 @@ pub fn sha256(parts: &[&[u8]]) -> [u8; 32] {
 
 /// HMAC-SHA256 over length-prefixed parts (no ambiguity between part boundaries).
 pub fn mac(key: &[u8; 32], parts: &[&[u8]]) -> [u8; 32] {
-    let mut m = <HmacSha256 as Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+    let mut m = <HmacSha256 as KeyInit>::new_from_slice(key).expect("HMAC accepts any key length");
     for p in parts {
         m.update(&(p.len() as u32).to_be_bytes());
         m.update(p);
@@ -156,15 +156,15 @@ pub fn seq_nonce(seq: u64) -> [u8; 12] {
 
 /// ChaCha20-Poly1305 encrypt.
 pub fn seal(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
-    ChaCha20Poly1305::new(Key::from_slice(key))
-        .encrypt(Nonce::from_slice(nonce), Payload { msg: plaintext, aad })
+    ChaCha20Poly1305::new(&Key::from(*key))
+        .encrypt(&Nonce::from(*nonce), Payload { msg: plaintext, aad })
         .map_err(|_| Error::Crypto("encryption failed"))
 }
 
 /// ChaCha20-Poly1305 decrypt.
 pub fn open(key: &[u8; 32], nonce: &[u8; 12], aad: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
-    ChaCha20Poly1305::new(Key::from_slice(key))
-        .decrypt(Nonce::from_slice(nonce), Payload { msg: ciphertext, aad })
+    ChaCha20Poly1305::new(&Key::from(*key))
+        .decrypt(&Nonce::from(*nonce), Payload { msg: ciphertext, aad })
         .map_err(|_| Error::Auth("decryption failed"))
 }
 

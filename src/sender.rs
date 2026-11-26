@@ -15,8 +15,8 @@ use crate::path::Path;
 use crate::policy::Policy;
 use crate::receiver::{ack_mac, close_mac, decoy_nonce, payload_aad, reply_mac};
 use crate::util;
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use std::collections::HashSet;
 use std::fmt;
 use zeroize::Zeroize;
@@ -316,7 +316,7 @@ impl Sender {
             }
             ProbeKind::PayloadLike => {
                 let mut plain = vec![0u8; self.policy.verification.payload_like_len as usize];
-                OsRng.fill_bytes(&mut plain);
+                SysRng.try_fill_bytes(&mut plain).expect("operating system CSPRNG unavailable");
                 let body = crypto::seal(&session.keys.decoy, &decoy_nonce(probe_id), &session.id, &plain)
                     .expect("AEAD encryption of a bounded decoy cannot fail");
                 (body, plain)
