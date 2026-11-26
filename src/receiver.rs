@@ -15,6 +15,7 @@ const MAX_SESSIONS: usize = 1024;
 const MAX_SEEN_PROBES: usize = 4096;
 
 struct RecvSession {
+    sender: [u8; 32],
     keys: SessionKeys,
     last_seq: u64,
     seen_probes: HashSet<ProbeId>,
@@ -29,22 +30,105 @@ pub fn payload_aad(session_id: &SessionId, recipient: &[u8; 32], seq: u64) -> Ve
     v
 }
 
+/// Who may open sessions with a receiver.
+///
+/// Authentication (a valid Ed25519 signature) proves which key signed the hello.
+/// Authorization decides whether that key is allowed to send to this receiver.
+/// They are separate checks, and a receiver is **deny-by-default**: until a
+/// policy is configured, no sender is accepted.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum SenderPolicy {
+    /// Accept nobody. The default.
+    #[default]
+    DenyAll,
+    /// Accept only these sender identities.
+    AllowList(HashSet<[u8; 32]>),
+    /// Accept any sender that proves possession of its key. Only appropriate for
+    /// public services or tests, because it provides authentication without
+    /// authorization.
+    AllowAnyAuthenticated,
+}
+
+impl SenderPolicy {
+    /// Is this sender identity authorized?
+    pub fn permits(&self, sender: &[u8; 32]) -> bool {
+        match self {
+            SenderPolicy::DenyAll => false,
+            SenderPolicy::AllowList(set) => set.contains(sender),
+            SenderPolicy::AllowAnyAuthenticated => true,
+        }
+    }
+}
+
+/// Counters describing what the receiver has refused. Local only: nothing here
+/// is sent over the network, so it does not give a remote attacker an oracle.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReceiverStats {
+    /// Hellos with a valid signature from an identity the policy does not permit.
+    pub rejected_unauthorized: u64,
+}
+
 /// Receiver endpoint.
 pub struct Receiver {
     identity: Identity,
-    allowed: Option<HashSet<[u8; 32]>>,
+    policy: SenderPolicy,
+    stats: ReceiverStats,
     sessions: HashMap<SessionId, RecvSession>,
     delivered: Vec<Vec<u8>>,
 }
 
 impl Receiver {
-    /// New receiver accepting any authenticated sender.
+    /// New receiver. It is **deny-by-default**: configure who may send with
+    /// [`Receiver::allow_sender`] or [`Receiver::set_sender_policy`].
     pub fn new(identity: Identity) -> Self {
-        Self { identity, allowed: None, sessions: HashMap::new(), delivered: Vec::new() }
+        Self {
+            identity,
+            policy: SenderPolicy::DenyAll,
+            stats: ReceiverStats::default(),
+            sessions: HashMap::new(),
+            delivered: Vec::new(),
+        }
     }
-    /// Restrict to known sender identities.
+    /// Replace the authorization policy. Sessions of senders the new policy no
+    /// longer permits are closed immediately.
+    pub fn set_sender_policy(&mut self, policy: SenderPolicy) {
+        self.policy = policy;
+        let policy = &self.policy;
+        self.sessions.retain(|_, s| policy.permits(&s.sender));
+    }
+    /// Permit one sender identity. If the current policy is not an allow-list
+    /// (deny-all, or allow-any-authenticated), it becomes an allow-list
+    /// containing just this identity, so calling this never widens access.
     pub fn allow_sender(&mut self, sender: PublicIdentity) {
-        self.allowed.get_or_insert_with(HashSet::new).insert(sender.0);
+        match &mut self.policy {
+            SenderPolicy::AllowList(set) => {
+                set.insert(sender.0);
+            }
+            other => *other = SenderPolicy::AllowList(HashSet::from([sender.0])),
+        }
+    }
+    /// Remove a sender from the allow-list (key revocation or rotation) and
+    /// close its live sessions. Returns false if the identity was not listed.
+    pub fn revoke_sender(&mut self, sender: &PublicIdentity) -> bool {
+        let removed = match &mut self.policy {
+            SenderPolicy::AllowList(set) => set.remove(&sender.0),
+            _ => false,
+        };
+        self.sessions.retain(|_, s| s.sender != sender.0);
+        removed
+    }
+    /// Accept any sender that proves possession of its key. Explicit opt-out of
+    /// authorization; see [`SenderPolicy::AllowAnyAuthenticated`].
+    pub fn allow_any_authenticated_sender(&mut self) {
+        self.policy = SenderPolicy::AllowAnyAuthenticated;
+    }
+    /// Current authorization policy.
+    pub fn sender_policy(&self) -> &SenderPolicy {
+        &self.policy
+    }
+    /// Refusal counters.
+    pub fn stats(&self) -> &ReceiverStats {
+        &self.stats
     }
     /// Receiver public identity.
     pub fn public(&self) -> PublicIdentity {
@@ -88,10 +172,13 @@ impl Receiver {
                 if !PublicIdentity(sender_id).verify(&hi, &sig) {
                     return Err(RejectCode::AuthFailed);
                 }
-                if let Some(allowed) = &self.allowed {
-                    if !allowed.contains(&sender_id) {
-                        return Err(RejectCode::AuthFailed);
-                    }
+                // Authorization is checked after authentication and before any key
+                // agreement or session state is created. The wire reply is the same
+                // as for a bad signature, so a remote party learns nothing about
+                // which identities are trusted.
+                if !self.policy.permits(&sender_id) {
+                    self.stats.rejected_unauthorized += 1;
+                    return Err(RejectCode::AuthFailed);
                 }
                 let eph = Ephemeral::generate();
                 let recv_eph = eph.public;
@@ -100,7 +187,10 @@ impl Receiver {
                 let mut shared = eph.agree(&sender_eph).map_err(|_| RejectCode::AuthFailed)?;
                 let keys = derive_session_keys(&shared, &transcript(&hi, &ai));
                 shared.zeroize();
-                self.sessions.insert(session_id, RecvSession { keys, last_seq: 0, seen_probes: HashSet::new() });
+                self.sessions.insert(
+                    session_id,
+                    RecvSession { sender: sender_id, keys, last_seq: 0, seen_probes: HashSet::new() },
+                );
                 Ok(Message::HelloAck { session_id, recv_eph, recv_id: me, sig: ack_sig })
             }
             Message::Probe { session_id, probe_id, kind, seq, body, mac: tag } => {

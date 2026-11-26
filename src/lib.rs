@@ -44,5 +44,5 @@ pub use crypto::{Identity, PublicIdentity};
 pub use error::{Error, Result};
 pub use path::{Path, PathError, PathResponse};
 pub use policy::Policy;
-pub use receiver::Receiver;
+pub use receiver::{Receiver, ReceiverStats, SenderPolicy};
 pub use sender::{SendError, SendReport, Sender};

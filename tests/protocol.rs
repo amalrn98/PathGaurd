@@ -88,6 +88,7 @@ fn unknown_sender_is_rejected_when_allow_list_is_set() {
 #[test]
 fn replayed_hello_is_rejected() {
     let mut recv = Receiver::new(Identity::generate());
+    recv.allow_any_authenticated_sender();
     let sender = Identity::generate();
     let eph = crypto::Ephemeral::generate();
     let sid = [9u8; 16];

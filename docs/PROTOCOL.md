@@ -36,7 +36,7 @@ ack_input   = "pathguard/v1/ack" || SHA256(len-prefixed hello_input) || session_
 HelloAck.sig = Ed25519(receiver_sk, ack_input)
 ```
 
-Receiver checks: `recipient == own id`, session id unused, valid sender signature, sender on allow-list (if set).
+Receiver checks: `recipient == own id`, session id unused, valid sender signature, then **authorization**: the sender identity must be permitted by the receiver's `SenderPolicy` (deny-by-default, see [KEYS_AND_AUTHORIZATION.md](KEYS_AND_AUTHORIZATION.md)). Nothing is allocated before the authorization check passes.
 Sender checks: session id echoed, `recv_id == pinned id` (constant time), valid receiver signature, X25519 output is contributory (low-order points rejected).
 
 Naming the recipient inside the signed hello stops a hello from being replayed to a different receiver.

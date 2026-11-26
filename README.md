@@ -182,6 +182,7 @@ policies/        example policies
 ## Documentation
 
 * [Protocol specification](docs/PROTOCOL.md)
+* [Keys, authentication and authorization](docs/KEYS_AND_AUTHORIZATION.md)
 * [Threat model](docs/THREAT_MODEL.md)
 * [Architecture](docs/ARCHITECTURE.md)
 * [Evaluation plan and current results](docs/EVALUATION.md)
