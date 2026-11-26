@@ -10,12 +10,14 @@ use crate::crypto::sha256;
 /// Bytes signed by the sender in the hello message.
 pub fn hello_input(
     session_id: &[u8; 16],
+    timestamp: u64,
     sender_eph: &[u8; 32],
     sender_id: &[u8; 32],
     recipient: &[u8; 32],
 ) -> Vec<u8> {
     let mut v = b"pathguard/v1/hello".to_vec();
     v.extend_from_slice(session_id);
+    v.extend_from_slice(&timestamp.to_be_bytes());
     v.extend_from_slice(sender_eph);
     v.extend_from_slice(sender_id);
     v.extend_from_slice(recipient);

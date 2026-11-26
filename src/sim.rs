@@ -6,6 +6,7 @@
 //! exactly which capability the attacker has.
 
 use crate::canary::{self, Honeypot};
+use crate::clock::ManualClock;
 use crate::crypto::{sha256, Ephemeral, Identity, PublicIdentity};
 use crate::handshake::{ack_input, hello_input};
 use crate::message::{Message, TAG_PAYLOAD, TAG_PROBE};
@@ -76,9 +77,9 @@ pub struct SimPath {
 impl SimPath {
     fn impersonate(&self, att: &Identity, req: &[u8]) -> PathResponse {
         let reply = match Message::decode(req) {
-            Ok(Message::Hello { session_id, sender_eph, sender_id, recipient, .. }) => {
+            Ok(Message::Hello { session_id, timestamp, sender_eph, sender_id, recipient, .. }) => {
                 let eph = Ephemeral::generate();
-                let hi = hello_input(&session_id, &sender_eph, &sender_id, &recipient);
+                let hi = hello_input(&session_id, timestamp, &sender_eph, &sender_id, &recipient);
                 let rid = att.public().0;
                 let ai = ack_input(&sha256(&[&hi]), &session_id, &eph.public, &rid);
                 Message::HelloAck { session_id, recv_eph: eph.public, recv_id: rid, sig: att.sign(&ai) }
@@ -155,6 +156,7 @@ pub struct World {
     receiver: Arc<Mutex<Receiver>>,
     recipient: PublicIdentity,
     sender_seed: [u8; 32],
+    clock: ManualClock,
     honeypot: Honeypot,
     capture: Capture,
 }
@@ -169,20 +171,28 @@ impl World {
     /// Fresh identities and an empty network.
     pub fn new() -> Self {
         let sender_id = Identity::generate();
-        let mut recv = Receiver::new(Identity::generate());
+        let clock = ManualClock::new(1_700_000_000);
+        let mut recv = Receiver::new(Identity::generate()).with_clock(Arc::new(clock.clone()));
         recv.allow_sender(sender_id.public());
         let recipient = recv.public();
         Self {
             receiver: Arc::new(Mutex::new(recv)),
             recipient,
             sender_seed: sender_id.seed_bytes(),
+            clock,
             honeypot: Honeypot::new(),
             capture: Arc::new(Mutex::new(Vec::new())),
         }
     }
     /// A sender pinned to this world's receiver and sharing its honeypot.
     pub fn sender(&self, policy: Policy) -> Sender {
-        Sender::new(Identity::from_seed(self.sender_seed), self.recipient, policy).with_honeypot(self.honeypot.clone())
+        Sender::new(Identity::from_seed(self.sender_seed), self.recipient, policy)
+            .with_clock(Arc::new(self.clock.clone()))
+            .with_honeypot(self.honeypot.clone())
+    }
+    /// The shared simulated clock. Advance it to test expiry.
+    pub fn clock(&self) -> &ManualClock {
+        &self.clock
     }
     /// Receiver identity.
     pub fn recipient(&self) -> PublicIdentity {

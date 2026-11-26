@@ -6,6 +6,7 @@
 //! fresh handshake with new ephemeral keys, starting from the next path.
 
 use crate::canary::{CanaryIssuer, Honeypot};
+use crate::clock::{Clock, SystemClock};
 use crate::crypto::{self, derive_session_keys, sha256, Ephemeral, Identity, PublicIdentity, SessionKeys};
 use crate::detect::{score, summarize, Detector, Finding, FindingKind, Severity};
 use crate::handshake::{ack_input, hello_input, transcript};
@@ -19,6 +20,7 @@ use rand::rngs::SysRng;
 use rand::TryRng;
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 use zeroize::Zeroize;
 
 /// Largest payload accepted by `send`.
@@ -180,6 +182,7 @@ enum AttemptResult {
 
 /// Sender endpoint.
 pub struct Sender {
+    clock: Arc<dyn Clock>,
     identity: Identity,
     recipient: PublicIdentity,
     policy: Policy,
@@ -189,7 +192,12 @@ pub struct Sender {
 impl Sender {
     /// New sender pinned to one receiver identity.
     pub fn new(identity: Identity, recipient: PublicIdentity, policy: Policy) -> Self {
-        Self { identity, recipient, policy, honeypot: Honeypot::new() }
+        Self { clock: Arc::new(SystemClock), identity, recipient, policy, honeypot: Honeypot::new() }
+    }
+    /// Use a specific clock (tests and simulation).
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
     /// Use an existing honeypot, so the thing that watches your bait and this sender share one log.
     pub fn with_honeypot(mut self, honeypot: Honeypot) -> Self {
@@ -259,10 +267,18 @@ impl Sender {
         let eph = Ephemeral::generate();
         let eph_pub = eph.public;
         let me = self.identity.public().0;
-        let hi = hello_input(&session_id, &eph_pub, &me, &self.recipient.0);
+        let timestamp = self.clock.unix_secs();
+        let hi = hello_input(&session_id, timestamp, &eph_pub, &me, &self.recipient.0);
         let sig = self.identity.sign(&hi);
-        let req = Message::Hello { session_id, sender_eph: eph_pub, sender_id: me, recipient: self.recipient.0, sig }
-            .encode();
+        let req = Message::Hello {
+            session_id,
+            timestamp,
+            sender_eph: eph_pub,
+            sender_id: me,
+            recipient: self.recipient.0,
+            sig,
+        }
+        .encode();
         let resp = path.exchange(&req).map_err(|e| format!("transport: {e}"))?;
         let first = resp.replies.first().ok_or_else(|| "no reply to hello".to_string())?;
         match Message::decode(first) {

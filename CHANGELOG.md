@@ -4,6 +4,11 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Changed (breaking, draft protocol)
+
+- Receivers are deny-by-default: a sender must be allowed explicitly (`allow_sender`, `set_sender_policy`) or the receiver must opt out with `allow_any_authenticated_sender` (#10).
+- The hello message carries a signed timestamp. Receivers reject stale or future hellos, replayed hellos (bounded replay cache), expired sessions, and enforce handshake rate and session caps (#9). New reject codes `Stale` (6) and `TooLarge` (7).
+
 ### Added
 
 - Reference implementation in Rust: Ed25519 pinned-identity handshake, X25519 key agreement, HKDF key schedule, ChaCha20-Poly1305 payload encryption.

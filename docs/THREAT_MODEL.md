@@ -29,6 +29,9 @@ Out of scope: compromise of either endpoint, theft of private keys, denial of se
 | Payload replay | Strictly increasing sequence, per-session keys | Cryptographic |
 | Probe replay | Unique probe ids remembered by the receiver | Cryptographic |
 | Hello replay to another receiver | Recipient inside the signed hello | Cryptographic |
+| Hello replay to the same receiver | Signed timestamp, replay cache until the hello is stale | Cryptographic plus bounded state |
+| Abandoned or exhausted sessions | Absolute session lifetime, session caps, fail-closed capacity | Resource bound |
+| Handshake flood | Global fixed-window rate limit | Mitigation only, see below |
 | Tampering with probes or replies | Probe and reply MACs | Cryptographic detection |
 | Packet duplication | Duplicate reply finding | Heuristic, weak |
 | Timing manipulation | RTT baseline z-score | Heuristic, weak |
@@ -49,8 +52,9 @@ A new route with correct authentication is not an attack. PathGuard never treats
 * **Traffic analysis:** probes add traffic with a recognizable shape in plaintext (`pgprobe:` and bait). Padding and timing obfuscation are not implemented. Payload-like decoys match payload size only roughly.
 * **Probe confidentiality:** kinds 0 and 1 are intentionally readable (they are bait). An observer can tell a verification phase is happening.
 * **Honeypot:** the honeypot is an in-process log. A real deployment needs a listener that records contact with bait endpoints and calls `touch`.
-* **Session lifetime:** receiver sessions have no timeout or eviction beyond a hard cap.
-* **Clock-free design:** no timestamps are used, so no clock attacks, but also no expiry.
+* **Handshake rate limit is global, not per source.** Before a hello is authenticated the receiver cannot attribute it to anyone, so unauthenticated traffic can consume the rate budget and delay legitimate senders. The limit protects CPU and memory, not availability. Per-address limiting belongs in the transport layer, which sees addresses.
+* **Clock dependence:** hello freshness needs loosely synchronized clocks (default window 120 s). An attacker who can move the receiver's clock can widen the replay window. Within the window, replay is blocked by the replay cache.
+* **Replay cache is in memory:** a receiver restart forgets it. Hellos older than the skew window are still rejected as stale, so after a restart a captured hello is replayable only for the remaining part of its window if the receiver restarts inside it.
 * **Post-quantum:** key agreement is classical X25519.
 * **No audit:** protocol and code have not been reviewed by third parties.
 

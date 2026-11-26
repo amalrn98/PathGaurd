@@ -15,28 +15,39 @@ Limits: message 1 MiB, field 512 KiB. Decoding is bounds-checked and rejects tra
 
 | Tag | Message | Fields |
 |---|---|---|
-| 1 | Hello | session_id[16], sender_eph[32], sender_id[32], recipient[32], sig[64] |
+| 1 | Hello | session_id[16], timestamp u64, sender_eph[32], sender_id[32], recipient[32], sig[64] |
 | 2 | HelloAck | session_id[16], recv_eph[32], recv_id[32], sig[64] |
 | 3 | Probe | session_id[16], probe_id[16], kind u8, seq u64, body bytes, mac[32] |
 | 4 | ProbeReply | session_id[16], probe_id[16], seq u64, mac[32] |
 | 5 | Payload | session_id[16], seq u64, ciphertext bytes |
 | 6 | PayloadAck | session_id[16], seq u64, mac[32] |
 | 7 | Close | session_id[16], mac[32] |
-| 8 | Reject | code u8 (1 bad request, 2 unknown session, 3 auth failed, 4 replay, 5 busy) |
+| 8 | Reject | code u8 (1 bad request, 2 unknown session, 3 auth failed, 4 replay, 5 busy, 6 stale, 7 too large) |
 
 Probe kinds: 0 interception, 1 bait, 2 payload-like.
 
 ## 3. Handshake
 
 ```
-hello_input = "pathguard/v1/hello" || session_id || sender_eph || sender_id || recipient
+hello_input = "pathguard/v1/hello" || session_id || timestamp || sender_eph || sender_id || recipient
 Hello.sig   = Ed25519(sender_sk, hello_input)
 
 ack_input   = "pathguard/v1/ack" || SHA256(len-prefixed hello_input) || session_id || recv_eph || recv_id
 HelloAck.sig = Ed25519(receiver_sk, ack_input)
 ```
 
-Receiver checks: `recipient == own id`, session id unused, valid sender signature, then **authorization**: the sender identity must be permitted by the receiver's `SenderPolicy` (deny-by-default, see [KEYS_AND_AUTHORIZATION.md](KEYS_AND_AUTHORIZATION.md)). Nothing is allocated before the authorization check passes.
+Receiver checks, in this order (cheap checks first, so unauthenticated traffic costs little):
+
+1. `recipient == own id`.
+2. **Freshness:** `|timestamp - now| <= max_clock_skew` (default 120 s), else `Stale`. The timestamp is inside the signed input, so it cannot be changed without invalidating the signature.
+3. **Rate limit:** at most `max_handshakes_per_window` hellos per `handshake_window` (default 256 per 10 s), else `Busy`.
+4. **Replay:** the digest of the signed hello must not be in the replay cache and the session id must not be live, else `Replay`. The cache keeps an accepted hello until its timestamp would be rejected as stale anyway, so a captured hello cannot be replayed after its session was closed.
+5. **Capacity:** the session table and the replay cache must have room, else `Busy`. The receiver refuses new sessions rather than evicting live ones.
+6. Valid sender signature, then **authorization**: the sender identity must be permitted by the receiver's `SenderPolicy` (deny-by-default, see [KEYS_AND_AUTHORIZATION.md](KEYS_AND_AUTHORIZATION.md)).
+7. Per-sender session cap, else `Busy`.
+
+The replay cache is written only after steps 6 and 7 succeed, so forged hellos cannot fill it. Nothing is allocated for a hello before authorization passes.
+
 Sender checks: session id echoed, `recv_id == pinned id` (constant time), valid receiver signature, X25519 output is contributory (low-order points rejected).
 
 Naming the recipient inside the signed hello stops a hello from being replayed to a different receiver.
@@ -116,6 +127,20 @@ Withhold when any of these hold:
 
 With `tolerate_failed_secondary_paths`, a secondary path that fails verification or shows Medium or worse findings is excluded from the decision. Its findings still appear in the report as alerts. Canary triggers are session-level and are never excluded.
 
-## 10. Receiver limits
+## 10. Receiver state and limits
 
-At most 1024 concurrent sessions and 4096 remembered probe ids per session. Sessions have no timeout yet (see roadmap). The receiver never panics on network input.
+| Limit | Default | Hard ceiling |
+|---|---|---|
+| Clock skew | 120 s | 300 s |
+| Session lifetime (absolute) | 300 s | 3600 s |
+| Concurrent sessions | 1024 | 65 536 |
+| Sessions per sender | 16 | `max_sessions` |
+| Handshake rate | 256 per 10 s window | none (must be at least 1) |
+| Replay cache entries | 16 384 | 1 048 576 |
+| Remembered probe ids per session | 4096 | fixed |
+
+Every value may be lowered; `ReceiverConfig::validate` rejects values above the ceiling, so configuration cannot weaken the defaults past what the protocol allows. Sessions expire after their lifetime and their keys are zeroized. Expiry and replay-cache pruning run at most once per second, driven by incoming requests or `Receiver::maintain`. The receiver never panics on network input.
+
+**Time dependence.** Hello freshness is the only use of wall-clock time. A sender whose clock is off by more than the skew gets `Stale` and must fix its clock. The `Clock` trait makes the time source injectable.
+
+**Compatibility.** Adding the hello timestamp changed the wire format and the signed input of the draft v1 protocol. There are no released versions yet, so no compatibility shim is provided.

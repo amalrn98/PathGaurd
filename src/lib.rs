@@ -26,6 +26,7 @@
 #![deny(unsafe_code)]
 
 pub mod canary;
+pub mod clock;
 pub mod codec;
 pub mod crypto;
 pub mod detect;
@@ -44,5 +45,5 @@ pub use crypto::{Identity, PublicIdentity};
 pub use error::{Error, Result};
 pub use path::{Path, PathError, PathResponse};
 pub use policy::Policy;
-pub use receiver::{Receiver, ReceiverStats, SenderPolicy};
+pub use receiver::{Receiver, ReceiverConfig, ReceiverStats, SenderPolicy};
 pub use sender::{SendError, SendReport, Sender};

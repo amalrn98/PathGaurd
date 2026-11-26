@@ -60,8 +60,12 @@ pub enum RejectCode {
     AuthFailed = 3,
     /// Replay or duplicate detected.
     Replay = 4,
-    /// Receiver is at capacity.
+    /// Receiver is at capacity or rate limiting.
     Busy = 5,
+    /// Hello timestamp outside the freshness window (check clocks).
+    Stale = 6,
+    /// A field exceeded a protocol size limit.
+    TooLarge = 7,
 }
 
 impl RejectCode {
@@ -72,6 +76,8 @@ impl RejectCode {
             3 => Ok(Self::AuthFailed),
             4 => Ok(Self::Replay),
             5 => Ok(Self::Busy),
+            6 => Ok(Self::Stale),
+            7 => Ok(Self::TooLarge),
             _ => Err(Error::Malformed("unknown reject code")),
         }
     }
@@ -84,6 +90,9 @@ pub enum Message {
     Hello {
         /// Session id chosen by the sender.
         session_id: SessionId,
+        /// Sender clock, Unix seconds. Signed, so it gives the hello authenticated
+        /// freshness: the receiver rejects hellos outside its skew window.
+        timestamp: u64,
         /// Sender ephemeral X25519 key.
         sender_eph: [u8; 32],
         /// Sender Ed25519 identity.
@@ -167,9 +176,10 @@ impl Message {
     pub fn encode(&self) -> Vec<u8> {
         let mut w = Writer::new();
         match self {
-            Message::Hello { session_id, sender_eph, sender_id, recipient, sig } => {
+            Message::Hello { session_id, timestamp, sender_eph, sender_id, recipient, sig } => {
                 w.u8(TAG_HELLO);
                 w.raw(session_id);
+                w.u64(*timestamp);
                 w.raw(sender_eph);
                 w.raw(sender_id);
                 w.raw(recipient);
@@ -232,6 +242,7 @@ impl Message {
         let msg = match r.u8()? {
             TAG_HELLO => Message::Hello {
                 session_id: r.array()?,
+                timestamp: r.u64()?,
                 sender_eph: r.array()?,
                 sender_id: r.array()?,
                 recipient: r.array()?,
@@ -271,6 +282,7 @@ mod tests {
         let msgs = vec![
             Message::Hello {
                 session_id: [1; 16],
+                timestamp: 1_700_000_000,
                 sender_eph: [2; 32],
                 sender_id: [3; 32],
                 recipient: [4; 32],
