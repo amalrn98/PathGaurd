@@ -9,12 +9,11 @@ use crate::crypto::{
 };
 use crate::error::{Error, Result};
 use crate::handshake::{ack_input, hello_input, transcript};
+use crate::limits::{AEAD_TAG_LEN, MAX_PAYLOAD_BYTES, MAX_PROBES_PER_SESSION};
 use crate::message::{Message, ProbeId, ProbeKind, RejectCode, SessionId};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use zeroize::Zeroize;
-
-const MAX_SEEN_PROBES: usize = 4096;
 
 /// Resource and freshness limits of a receiver.
 ///
@@ -37,6 +36,18 @@ pub struct ReceiverConfig {
     pub max_handshakes_per_window: u32,
     /// Accepted hellos remembered to stop replay inside the freshness window.
     pub replay_cache_capacity: usize,
+    /// Largest plaintext payload accepted. Can be lowered, never raised past the
+    /// protocol limit `MAX_PAYLOAD_BYTES`.
+    pub max_payload_bytes: usize,
+    /// Payload messages accepted per session.
+    pub max_payloads_per_session: usize,
+    /// Probes accepted per session.
+    pub max_probes_per_session: usize,
+    /// Delivered payloads held until the application calls `take_delivered`.
+    /// When full the receiver answers `Busy` (backpressure) and keeps nothing new.
+    pub max_delivered_items: usize,
+    /// Total delivered plaintext bytes held until taken.
+    pub max_delivered_bytes: usize,
 }
 
 impl Default for ReceiverConfig {
@@ -49,6 +60,11 @@ impl Default for ReceiverConfig {
             handshake_window_secs: 10,
             max_handshakes_per_window: 256,
             replay_cache_capacity: 16_384,
+            max_payload_bytes: MAX_PAYLOAD_BYTES,
+            max_payloads_per_session: 16,
+            max_probes_per_session: MAX_PROBES_PER_SESSION,
+            max_delivered_items: 64,
+            max_delivered_bytes: 8 * 1024 * 1024,
         }
     }
 }
@@ -62,6 +78,12 @@ impl ReceiverConfig {
     pub const SESSIONS_CEILING: usize = 65_536;
     /// Hard ceiling for `replay_cache_capacity`.
     pub const REPLAY_CEILING: usize = 1 << 20;
+    /// Hard ceiling for `max_payloads_per_session`.
+    pub const PAYLOADS_PER_SESSION_CEILING: usize = 1_024;
+    /// Hard ceiling for `max_delivered_items`.
+    pub const DELIVERED_ITEMS_CEILING: usize = 4_096;
+    /// Hard ceiling for `max_delivered_bytes`.
+    pub const DELIVERED_BYTES_CEILING: usize = 64 * 1024 * 1024;
 
     /// Check every field against its floor (1) and ceiling.
     pub fn validate(&self) -> Result<()> {
@@ -87,6 +109,22 @@ impl ReceiverConfig {
         if self.replay_cache_capacity == 0 || self.replay_cache_capacity > Self::REPLAY_CEILING {
             return bad("replay_cache_capacity must be 1..=1048576");
         }
+        if self.max_payload_bytes == 0 || self.max_payload_bytes > MAX_PAYLOAD_BYTES {
+            return bad("max_payload_bytes must be 1..=262144");
+        }
+        if self.max_payloads_per_session == 0 || self.max_payloads_per_session > Self::PAYLOADS_PER_SESSION_CEILING {
+            return bad("max_payloads_per_session must be 1..=1024");
+        }
+        if self.max_probes_per_session == 0 || self.max_probes_per_session > MAX_PROBES_PER_SESSION {
+            return bad("max_probes_per_session must be 1..=1024");
+        }
+        if self.max_delivered_items == 0 || self.max_delivered_items > Self::DELIVERED_ITEMS_CEILING {
+            return bad("max_delivered_items must be 1..=4096");
+        }
+        if self.max_delivered_bytes < self.max_payload_bytes || self.max_delivered_bytes > Self::DELIVERED_BYTES_CEILING
+        {
+            return bad("max_delivered_bytes must be max_payload_bytes..=67108864");
+        }
         Ok(())
     }
 }
@@ -96,6 +134,7 @@ struct RecvSession {
     sender: [u8; 32],
     keys: SessionKeys,
     last_seq: u64,
+    payloads: usize,
     seen_probes: HashSet<ProbeId>,
 }
 
@@ -169,7 +208,8 @@ pub struct Receiver {
     window_count: u32,
     last_sweep: u64,
     sessions: HashMap<SessionId, RecvSession>,
-    delivered: Vec<Vec<u8>>,
+    delivered: VecDeque<Vec<u8>>,
+    delivered_bytes: usize,
 }
 
 impl Receiver {
@@ -187,7 +227,8 @@ impl Receiver {
             window_count: 0,
             last_sweep: 0,
             sessions: HashMap::new(),
-            delivered: Vec::new(),
+            delivered: VecDeque::new(),
+            delivered_bytes: 0,
         }
     }
     /// Use a specific clock (tests and simulation).
@@ -271,9 +312,19 @@ impl Receiver {
     pub fn public(&self) -> PublicIdentity {
         self.identity.public()
     }
-    /// Take payloads delivered so far.
+    /// Take payloads delivered so far. This is the consumer side of the bounded
+    /// delivery queue: until it is called, the queue keeps filling up to its limit.
     pub fn take_delivered(&mut self) -> Vec<Vec<u8>> {
-        std::mem::take(&mut self.delivered)
+        self.delivered_bytes = 0;
+        std::mem::take(&mut self.delivered).into()
+    }
+    /// Payloads currently waiting to be taken.
+    pub fn delivered_len(&self) -> usize {
+        self.delivered.len()
+    }
+    /// Plaintext bytes currently waiting to be taken.
+    pub fn delivered_bytes(&self) -> usize {
+        self.delivered_bytes
     }
     /// Number of live sessions.
     pub fn session_count(&self) -> usize {
@@ -289,6 +340,7 @@ impl Receiver {
                 Ok(r) => r,
                 Err(code) => Message::Reject { code },
             },
+            Err(Error::TooLarge) => Message::Reject { code: RejectCode::TooLarge },
             Err(_) => Message::Reject { code: RejectCode::BadRequest },
         };
         reply.encode()
@@ -361,17 +413,27 @@ impl Receiver {
                     .insert(digest, timestamp.saturating_add(self.config.max_clock_skew_secs).saturating_add(1));
                 self.sessions.insert(
                     session_id,
-                    RecvSession { created_at: now, sender: sender_id, keys, last_seq: 0, seen_probes: HashSet::new() },
+                    RecvSession {
+                        created_at: now,
+                        sender: sender_id,
+                        keys,
+                        last_seq: 0,
+                        payloads: 0,
+                        seen_probes: HashSet::new(),
+                    },
                 );
                 Ok(Message::HelloAck { session_id, recv_eph, recv_id: me, sig: ack_sig })
             }
             Message::Probe { session_id, probe_id, kind, seq, body, mac: tag } => {
                 let s = self.sessions.get_mut(&session_id).ok_or(RejectCode::UnknownSession)?;
+                if s.seen_probes.len() >= self.config.max_probes_per_session {
+                    return Err(RejectCode::Busy);
+                }
                 let parts: [&[u8]; 6] = [b"probe", &session_id, &probe_id, &[kind as u8], &seq.to_be_bytes(), &body];
                 if !mac_verify(&s.keys.probe, &parts, &tag) {
                     return Err(RejectCode::AuthFailed);
                 }
-                if s.seen_probes.len() >= MAX_SEEN_PROBES || !s.seen_probes.insert(probe_id) {
+                if !s.seen_probes.insert(probe_id) {
                     return Err(RejectCode::Replay);
                 }
                 let content = if kind == ProbeKind::PayloadLike {
@@ -386,15 +448,33 @@ impl Receiver {
             Message::Payload { session_id, seq, ciphertext } => {
                 let me = self.identity.public().0;
                 let s = self.sessions.get_mut(&session_id).ok_or(RejectCode::UnknownSession)?;
+                // Size first: reject before spending any crypto work or memory on it.
+                let plain_len = ciphertext.len().saturating_sub(AEAD_TAG_LEN);
+                if ciphertext.len() < AEAD_TAG_LEN || plain_len > self.config.max_payload_bytes {
+                    return Err(RejectCode::TooLarge);
+                }
                 if seq == 0 || seq <= s.last_seq {
                     return Err(RejectCode::Replay);
+                }
+                if s.payloads >= self.config.max_payloads_per_session {
+                    return Err(RejectCode::Busy);
+                }
+                // Backpressure: refuse, and keep nothing, while the delivery queue is
+                // full. Checked before decryption so a refused payload does not consume
+                // its sequence number and can be retried after the consumer catches up.
+                if self.delivered.len() >= self.config.max_delivered_items
+                    || self.delivered_bytes + plain_len > self.config.max_delivered_bytes
+                {
+                    return Err(RejectCode::Busy);
                 }
                 let aad = payload_aad(&session_id, &me, seq);
                 let plain = crypto::open(&s.keys.payload, &crypto::seq_nonce(seq), &aad, &ciphertext)
                     .map_err(|_| RejectCode::AuthFailed)?;
                 s.last_seq = seq;
+                s.payloads += 1;
                 let ack = ack_mac(&s.keys.probe, &session_id, seq, &ciphertext);
-                self.delivered.push(plain);
+                self.delivered_bytes += plain.len();
+                self.delivered.push_back(plain);
                 Ok(Message::PayloadAck { session_id, seq, mac: ack })
             }
             Message::Close { session_id, mac: tag } => {

@@ -11,7 +11,7 @@ Status: draft, matches the code in `src/`. Nothing here is audited. All integers
 ## 2. Wire format
 
 Every message starts with a one byte tag. Variable-length fields have a `u32` length prefix.
-Limits: message 1 MiB, field 512 KiB. Decoding is bounds-checked and rejects trailing bytes.
+Limits (defined once in `src/limits.rs` and shared by sender, receiver and decoder): payload 256 KiB (ciphertext 256 KiB + 16), probe body 16 KiB + 16, whole message 257 KiB. Decoding is bounds-checked, rejects trailing bytes, and checks every declared length against its limit **before** allocating, so a hostile length field cannot cause a large allocation. Oversized fields get `TooLarge`.
 
 | Tag | Message | Fields |
 |---|---|---|
@@ -137,9 +137,15 @@ With `tolerate_failed_secondary_paths`, a secondary path that fails verification
 | Sessions per sender | 16 | `max_sessions` |
 | Handshake rate | 256 per 10 s window | none (must be at least 1) |
 | Replay cache entries | 16 384 | 1 048 576 |
-| Remembered probe ids per session | 4096 | fixed |
+| Probes per session | 1024 | 1024 |
+| Payload messages per session | 16 | 1024 |
+| Payload size | 256 KiB | 256 KiB |
+| Delivered payloads waiting for the application | 64 | 4096 |
+| Delivered bytes waiting for the application | 8 MiB | 64 MiB |
 
 Every value may be lowered; `ReceiverConfig::validate` rejects values above the ceiling, so configuration cannot weaken the defaults past what the protocol allows. Sessions expire after their lifetime and their keys are zeroized. Expiry and replay-cache pruning run at most once per second, driven by incoming requests or `Receiver::maintain`. The receiver never panics on network input.
+
+**Delivery backpressure.** Accepted payloads wait in a bounded queue until the application calls `take_delivered`. When the queue is full the receiver answers `Busy` and stores nothing. The check runs before decryption, so the refused payload does not consume its sequence number and the same bytes are accepted once the consumer has caught up. An application that never drains the queue stops receiving new payloads rather than growing memory.
 
 **Time dependence.** Hello freshness is the only use of wall-clock time. A sender whose clock is off by more than the skew gets `Stale` and must fix its clock. The `Clock` trait makes the time source injectable.
 

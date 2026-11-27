@@ -2,10 +2,7 @@
 
 use crate::error::{Error, Result};
 
-/// Maximum size of any encoded message.
-pub const MAX_MESSAGE: usize = 1 << 20;
-/// Maximum size of a variable-length field.
-pub const MAX_FIELD: usize = 512 * 1024;
+pub use crate::limits::MAX_MESSAGE;
 
 /// Append-only writer.
 #[derive(Default)]
@@ -77,10 +74,12 @@ impl<'a> Reader<'a> {
         a.copy_from_slice(self.take(N)?);
         Ok(a)
     }
-    /// Read a length-prefixed byte string, rejecting lengths above `MAX_FIELD`.
-    pub fn bytes(&mut self) -> Result<Vec<u8>> {
+    /// Read a length-prefixed byte string. The declared length is checked
+    /// against `max` **before** anything is allocated or copied, so a hostile
+    /// length field cannot cause a large allocation.
+    pub fn bytes_max(&mut self, max: usize) -> Result<Vec<u8>> {
         let n = u32::from_be_bytes(self.array::<4>()?) as usize;
-        if n > MAX_FIELD {
+        if n > max {
             return Err(Error::TooLarge);
         }
         Ok(self.take(n)?.to_vec())
@@ -109,16 +108,18 @@ mod tests {
         let mut r = Reader::new(&buf);
         assert_eq!(r.u8().unwrap(), 7);
         assert_eq!(r.u64().unwrap(), 42);
-        assert_eq!(r.bytes().unwrap(), b"hello");
+        assert_eq!(r.bytes_max(16).unwrap(), b"hello");
         r.finish().unwrap();
     }
 
     #[test]
     fn rejects_truncated_and_oversized() {
         let mut r = Reader::new(&[0, 0, 0, 9, 1]);
-        assert!(r.bytes().is_err());
+        assert!(matches!(r.bytes_max(100), Err(Error::Malformed(_))));
         let mut r = Reader::new(&[0xff, 0xff, 0xff, 0xff]);
-        assert!(matches!(r.bytes(), Err(Error::TooLarge)));
+        assert!(matches!(r.bytes_max(100), Err(Error::TooLarge)));
+        let mut r = Reader::new(&[0, 0, 0, 5, 1, 2, 3, 4, 5]);
+        assert!(matches!(r.bytes_max(4), Err(Error::TooLarge)), "limit is exclusive of length 5");
         let r = Reader::new(&[1]);
         assert!(r.finish().is_err());
     }

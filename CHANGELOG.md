@@ -8,6 +8,7 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 - Receivers are deny-by-default: a sender must be allowed explicitly (`allow_sender`, `set_sender_policy`) or the receiver must opt out with `allow_any_authenticated_sender` (#10).
 - The hello message carries a signed timestamp. Receivers reject stale or future hellos, replayed hellos (bounded replay cache), expired sessions, and enforce handshake rate and session caps (#9). New reject codes `Stale` (6) and `TooLarge` (7).
+- Protocol size and count limits live in one module and are enforced before allocation. Delivered payloads sit in a bounded queue with backpressure. Per-session probe and payload caps (#15).
 
 ### Added
 

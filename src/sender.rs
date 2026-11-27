@@ -10,6 +10,7 @@ use crate::clock::{Clock, SystemClock};
 use crate::crypto::{self, derive_session_keys, sha256, Ephemeral, Identity, PublicIdentity, SessionKeys};
 use crate::detect::{score, summarize, Detector, Finding, FindingKind, Severity};
 use crate::handshake::{ack_input, hello_input, transcript};
+use crate::limits::MAX_PATHS;
 use crate::message::{Message, ProbeId, ProbeKind, SessionId};
 use crate::multipath::min_pairwise_diversity;
 use crate::path::Path;
@@ -23,8 +24,7 @@ use std::fmt;
 use std::sync::Arc;
 use zeroize::Zeroize;
 
-/// Largest payload accepted by `send`.
-pub const MAX_PAYLOAD: usize = 256 * 1024;
+pub use crate::limits::MAX_PAYLOAD_BYTES as MAX_PAYLOAD;
 
 /// Per-path verification result.
 #[derive(Debug, Clone)]
@@ -219,8 +219,11 @@ impl Sender {
         if paths.is_empty() {
             return Err(SendError::Policy("at least one path is required".into()));
         }
+        if paths.len() > MAX_PATHS {
+            return Err(SendError::Policy(format!("at most {MAX_PATHS} paths are supported")));
+        }
         if payload.len() > MAX_PAYLOAD {
-            return Err(SendError::Policy("payload too large".into()));
+            return Err(SendError::Policy(format!("payload exceeds the {MAX_PAYLOAD} byte protocol limit")));
         }
         let mut rep = SendReport::new(&self.policy.name);
         let mut det = Detector::new(self.policy.verification.max_rtt_zscore);

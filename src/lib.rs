@@ -32,6 +32,7 @@ pub mod crypto;
 pub mod detect;
 pub mod error;
 pub mod handshake;
+pub mod limits;
 pub mod message;
 pub mod multipath;
 pub mod path;

@@ -1,6 +1,7 @@
 //! Security policy: which mechanisms run and what must hold before release.
 
 use crate::error::{Error, Result};
+use crate::limits::{MAX_PROBES_PER_PATH, MAX_PROBE_PLAINTEXT};
 use serde::{Deserialize, Serialize};
 
 /// Independently switchable mechanisms.
@@ -169,7 +170,7 @@ impl Policy {
     pub fn validate(&self) -> Result<()> {
         let v = &self.verification;
         let bad = |m: &str| Err(Error::Policy(m.to_string()));
-        if !(1..=64).contains(&v.probes_per_path) {
+        if !(1..=MAX_PROBES_PER_PATH).contains(&v.probes_per_path) {
             return bad("probes_per_path must be 1..=64");
         }
         if v.min_verified_paths == 0 || v.min_verified_paths > 16 {
@@ -184,7 +185,7 @@ impl Policy {
         if !v.max_rtt_zscore.is_finite() || v.max_rtt_zscore <= 0.0 {
             return bad("max_rtt_zscore must be positive");
         }
-        if !(16..=16384).contains(&v.payload_like_len) {
+        if !(16..=MAX_PROBE_PLAINTEXT as u32).contains(&v.payload_like_len) {
             return bad("payload_like_len must be 16..=16384");
         }
         if self.failure.max_retries > 10 {

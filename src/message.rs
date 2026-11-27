@@ -1,7 +1,8 @@
 //! Wire messages.
 
-use crate::codec::{Reader, Writer, MAX_MESSAGE};
+use crate::codec::{Reader, Writer};
 use crate::error::{Error, Result};
+use crate::limits::{MAX_MESSAGE, MAX_PAYLOAD_CIPHERTEXT, MAX_PROBE_BODY};
 
 /// Session identifier.
 pub type SessionId = [u8; 16];
@@ -256,13 +257,17 @@ impl Message {
                 probe_id: r.array()?,
                 kind: ProbeKind::from_u8(r.u8()?)?,
                 seq: r.u64()?,
-                body: r.bytes()?,
+                body: r.bytes_max(MAX_PROBE_BODY)?,
                 mac: r.array()?,
             },
             TAG_PROBE_REPLY => {
                 Message::ProbeReply { session_id: r.array()?, probe_id: r.array()?, seq: r.u64()?, mac: r.array()? }
             }
-            TAG_PAYLOAD => Message::Payload { session_id: r.array()?, seq: r.u64()?, ciphertext: r.bytes()? },
+            TAG_PAYLOAD => Message::Payload {
+                session_id: r.array()?,
+                seq: r.u64()?,
+                ciphertext: r.bytes_max(MAX_PAYLOAD_CIPHERTEXT)?,
+            },
             TAG_PAYLOAD_ACK => Message::PayloadAck { session_id: r.array()?, seq: r.u64()?, mac: r.array()? },
             TAG_CLOSE => Message::Close { session_id: r.array()?, mac: r.array()? },
             TAG_REJECT => Message::Reject { code: RejectCode::from_u8(r.u8()?)? },
