@@ -51,7 +51,7 @@ A new route with correct authentication is not an attack. PathGuard never treats
 
 * **Traffic analysis:** probes add traffic with a recognizable shape in plaintext (`pgprobe:` and bait). Padding and timing obfuscation are not implemented. Payload-like decoys match payload size only roughly.
 * **Probe confidentiality:** kinds 0 and 1 are intentionally readable (they are bait). An observer can tell a verification phase is happening.
-* **Honeypot:** the honeypot is an in-process log. A real deployment needs a listener that records contact with bait endpoints and calls `touch`.
+* **Honeypot:** the in-process honeypot is for the simulator. Real deployments use the [canary service](CANARY_SERVICE.md). It is a small single-instance service with a shared symmetric key, and an outage lowers confidence (or withholds, with `canary_required`) rather than being treated as clean.
 * **Handshake rate limit is global, not per source.** Before a hello is authenticated the receiver cannot attribute it to anyone, so unauthenticated traffic can consume the rate budget and delay legitimate senders. The limit protects CPU and memory, not availability. Per-address limiting belongs in the transport layer, which sees addresses.
 * **Clock dependence:** hello freshness needs loosely synchronized clocks (default window 120 s). An attacker who can move the receiver's clock can widen the replay window. Within the window, replay is blocked by the replay cache.
 * **Replay cache is in memory:** a receiver restart forgets it. Hellos older than the skew window are still rejected as stale, so after a restart a captured hello is replayable only for the remaining part of its window if the receiver restarts inside it.

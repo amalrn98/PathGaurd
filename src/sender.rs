@@ -242,6 +242,7 @@ impl Registry {
 /// Sender endpoint.
 pub struct Sender {
     canary: Arc<dyn CanarySource>,
+    bait_base: String,
     registry: Mutex<Registry>,
     clock: Arc<dyn Clock>,
     identity: Identity,
@@ -256,6 +257,7 @@ impl Sender {
         let honeypot = Honeypot::new();
         Self {
             canary: Arc::new(honeypot.clone()),
+            bait_base: "https://pg-honeypot.invalid".to_string(),
             registry: Mutex::new(Registry::default()),
             clock: Arc::new(SystemClock),
             identity,
@@ -273,6 +275,12 @@ impl Sender {
     pub fn with_honeypot(mut self, honeypot: Honeypot) -> Self {
         self.canary = Arc::new(honeypot.clone());
         self.honeypot = honeypot;
+        self
+    }
+    /// Base URL of your canary service, used to build bait URLs (`<base>/c/<token>`).
+    /// The default points at a reserved, non-resolving name.
+    pub fn with_bait_base_url(mut self, base: impl Into<String>) -> Self {
+        self.bait_base = base.into().trim_end_matches('/').to_string();
         self
     }
     /// Observe canaries through another source, for example a remote canary service.
@@ -442,8 +450,8 @@ impl Sender {
             }
             ProbeKind::Bait => {
                 let t = issuer.issue("bait");
-                let b = format!("svc-backup credentials: user=backup token={t} url=https://pg-honeypot.invalid/{t}")
-                    .into_bytes();
+                let b =
+                    format!("svc-backup credentials: user=backup token={t} url={}/c/{t}", self.bait_base).into_bytes();
                 (b.clone(), b)
             }
             ProbeKind::PayloadLike => {
@@ -704,6 +712,7 @@ impl Sender {
         let mut hops: Vec<Vec<String>> = Vec::new();
         let mut findings: Vec<Finding> = Vec::new();
         let mut canary_ok = true;
+        let mut register_error: Option<CanaryError> = None;
         if !kinds.is_empty() {
             let targets: Vec<usize> = if self.policy.mechanisms.multipath { order.to_vec() } else { vec![primary] };
             if self.canary_enabled() {
@@ -712,8 +721,8 @@ impl Sender {
                 let planned = targets.len() * self.policy.verification.probes_per_path as usize;
                 if let Err(e) = self.canary.register(&issuer.preview(planned)) {
                     canary_ok = false;
-                    findings.push(self.canary_failure(&e));
                     rep.log(format!("attempt {n}: canary registration failed: {e}"));
+                    register_error = Some(e);
                 }
             }
             for pi in targets {
@@ -736,6 +745,11 @@ impl Sender {
             reg.remember(session.id, issuer.issued().clone());
         }
         let (cf, polled_ok) = self.poll_canaries(&issuer);
+        // One outage is one finding: a failed registration is only recorded separately
+        // when the later poll worked (otherwise the poll failure already says it).
+        if let (Some(e), true) = (&register_error, polled_ok) {
+            findings.push(self.canary_failure(e));
+        }
         findings.extend(cf);
         rep.canary_status = match (self.canary_enabled(), canary_ok && polled_ok) {
             (false, _) => CanaryStatus::NotUsed,

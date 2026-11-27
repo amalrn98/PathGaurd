@@ -155,6 +155,7 @@ Read these before drawing any conclusion from this project.
 * **No decoy can prove a path is clean.** A relay attacker can forward probes to the real receiver and forward the answers back. PathGuard relies on endpoint authentication and keys for security, and treats route changes as normal, not as compromise.
 * **Detection signals are evidence, not verdicts.** Timing and duplication are weak. Canaries only fire if someone touches them.
 * **Path diversity is an input, not a discovery.** You supply hop identifiers (ASNs, routers). Wrong data gives a wrong diversity score. Unknown hops count as no diversity.
+* **Canary service is basic.** It is a small standard-library HTTP listener with a shared-key protocol. See [CANARY_SERVICE.md](docs/CANARY_SERVICE.md).
 * **Simulation only.** The current results come from a deterministic in-memory simulator. No real-network measurements exist yet.
 * **Not implemented yet:** traffic padding and timing obfuscation, real transports, post-quantum key establishment, Noise or TLS 1.3 integration, an independent audit. See the [threat model](docs/THREAT_MODEL.md).
 
@@ -168,7 +169,10 @@ src/
   sender.rs      verify, decide, release; retries with fresh keys
   receiver.rs    session state, replay protection, authenticated replies
   detect.rs      findings, severities, RTT baselines
-  canary.rs      canary tokens and the honeypot
+  canary.rs      canary tokens, honeypot, CanarySource trait
+  canary_service.rs  external canary listener and its authenticated client
+  clock.rs       injectable time source
+  limits.rs      shared protocol size and count limits
   multipath.rs   path diversity
   policy.rs      TOML policy, presets, validation
   path.rs        transport trait
@@ -183,6 +187,7 @@ policies/        example policies
 
 * [Protocol specification](docs/PROTOCOL.md)
 * [Keys, authentication and authorization](docs/KEYS_AND_AUTHORIZATION.md)
+* [Canary service](docs/CANARY_SERVICE.md)
 * [Threat model](docs/THREAT_MODEL.md)
 * [Architecture](docs/ARCHITECTURE.md)
 * [Evaluation plan and current results](docs/EVALUATION.md)

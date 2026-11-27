@@ -26,6 +26,7 @@
 #![deny(unsafe_code)]
 
 pub mod canary;
+pub mod canary_service;
 pub mod clock;
 pub mod codec;
 pub mod crypto;

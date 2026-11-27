@@ -1,6 +1,8 @@
 //! `pathguard` command line: scenario demos, the scenario matrix, key generation
 //! and policy presets.
 
+use pathguard::canary_service::{CanaryService, ServiceConfig};
+use pathguard::clock::SystemClock;
 use pathguard::sim;
 use pathguard::util;
 use pathguard::{Identity, Policy};
@@ -18,6 +20,9 @@ COMMANDS:
     matrix                                        Run every scenario under baseline, balanced and paranoid
     policy [baseline|balanced|paranoid]           Print a policy preset as TOML
     keygen <FILE>                                 Create an Ed25519 identity (secret seed written to FILE, mode 0600)
+    canary-keygen <FILE>                          Create the shared reporting key for a canary service (mode 0600)
+    canary-serve --listen ADDR --key-file FILE [--log-source] [--ttl SECS]
+                                                  Run the canary listener (bait URLs at /c/<token>)
     version                                       Print the version
     help                                          Print this help
 
@@ -103,6 +108,41 @@ fn cmd_keygen(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+fn write_secret_file(file: &str, secret_hex: &str) -> Result<(), String> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts.open(file).map_err(|e| format!("cannot create '{file}': {e}"))?;
+    writeln!(f, "{secret_hex}").map_err(|e| e.to_string())
+}
+
+fn cmd_canary_keygen(args: &[String]) -> Result<(), String> {
+    let file = args.first().ok_or("usage: pathguard canary-keygen <FILE>")?;
+    write_secret_file(file, &util::hex(&util::random::<32>()))?;
+    println!("reporting key written to {file}. Share it only with the canary service and the senders it serves.");
+    Ok(())
+}
+
+fn cmd_canary_serve(args: &[String]) -> Result<(), String> {
+    let listen = flag(args, "--listen").unwrap_or_else(|| "127.0.0.1:8099".into());
+    let key_file = flag(args, "--key-file").ok_or("--key-file is required")?;
+    let key_hex = std::fs::read_to_string(&key_file).map_err(|e| format!("cannot read '{key_file}': {e}"))?;
+    let key = util::from_hex::<32>(key_hex.trim()).ok_or("key file must contain 64 hex characters")?;
+    let mut cfg = ServiceConfig::new(key);
+    cfg.log_source = args.iter().any(|a| a == "--log-source");
+    if let Some(ttl) = flag(args, "--ttl") {
+        cfg.event_ttl_secs = ttl.parse().map_err(|_| "--ttl must be a number of seconds")?;
+    }
+    let listener = std::net::TcpListener::bind(&listen).map_err(|e| format!("cannot listen on {listen}: {e}"))?;
+    println!("canary service listening on {listen} (source logging: {})", cfg.log_source);
+    let svc = std::sync::Arc::new(CanaryService::new(cfg, std::sync::Arc::new(SystemClock)));
+    svc.serve(listener, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))).map_err(|e| e.to_string())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().map(String::as_str).unwrap_or("help");
@@ -130,6 +170,8 @@ fn main() -> ExitCode {
             }
         }
         "keygen" => cmd_keygen(rest),
+        "canary-keygen" => cmd_canary_keygen(rest),
+        "canary-serve" => cmd_canary_serve(rest),
         "version" | "--version" | "-V" => {
             println!("pathguard {}", env!("CARGO_PKG_VERSION"));
             Ok(())
