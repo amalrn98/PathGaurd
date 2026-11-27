@@ -788,21 +788,52 @@ impl Sender {
             }
         };
         let req = Message::Payload { session_id: session.id, seq, ciphertext: ct.clone() }.encode();
-        let acked = match paths[primary].exchange(&req) {
-            Ok(resp) => resp
-                .replies
-                .first()
-                .map(|raw| match Message::decode(raw) {
-                    Ok(Message::PayloadAck { session_id, seq: s, mac: tag }) => {
-                        session_id == session.id
-                            && s == seq
-                            && util::ct_eq(&ack_mac(&session.keys.probe, &session.id, seq, &ct), &tag)
+        let ack = match paths[primary].exchange(&req) {
+            Err(e) => Err(Finding::new(
+                FindingKind::PayloadUnacknowledged,
+                Severity::Medium,
+                &primary_id,
+                format!("no acknowledgement: {e}"),
+            )),
+            Ok(resp) => match resp.replies.first().map(|raw| Message::decode(raw)) {
+                None => Err(Finding::new(
+                    FindingKind::PayloadUnacknowledged,
+                    Severity::Medium,
+                    &primary_id,
+                    "empty response",
+                )),
+                Some(Ok(Message::PayloadAck { session_id, seq: s, mac: tag })) => {
+                    let valid = session_id == session.id
+                        && s == seq
+                        && util::ct_eq(&ack_mac(&session.keys.probe, &session.id, seq, &ct), &tag);
+                    if valid {
+                        Ok(())
+                    } else {
+                        Err(Finding::new(
+                            FindingKind::PayloadAckInvalid,
+                            Severity::Critical,
+                            &primary_id,
+                            "acknowledgement MAC invalid",
+                        ))
                     }
-                    _ => false,
-                })
-                .unwrap_or(false),
-            Err(_) => false,
+                }
+                // A Reject is not authenticated, so it proves nothing about whether the
+                // receiver kept the payload. Report it, but never treat it as "safe to resend".
+                Some(Ok(Message::Reject { code })) => Err(Finding::new(
+                    FindingKind::PayloadRejected,
+                    Severity::Critical,
+                    &primary_id,
+                    format!("receiver rejected the payload ({code:?}); it was altered in transit or refused"),
+                )),
+                Some(_) => Err(Finding::new(
+                    FindingKind::PayloadAckInvalid,
+                    Severity::Critical,
+                    &primary_id,
+                    "unparseable response to payload",
+                )),
+            },
         };
+        let acked = ack.is_ok();
         let (late, _) = self.poll_canaries(&issuer);
         for f in late.into_iter().filter(|f| f.kind == FindingKind::CanaryTriggered) {
             rep.log(format!("attempt {n}: canary triggered after release (session may be exposed): {f}"));
@@ -813,7 +844,14 @@ impl Sender {
             self.close(&mut *paths[primary], &session);
             AttemptResult::Delivered
         } else {
-            rep.log(format!("attempt {n}: no valid acknowledgement; delivery unconfirmed"));
+            if let Err(f) = ack {
+                rep.log(format!("attempt {n}: payload not acknowledged: {f}"));
+                rep.findings.push(f);
+            }
+            // The session is invalidated: closed and its keys dropped. No automatic retry,
+            // because the receiver may already hold the data.
+            self.close(&mut *paths[primary], &session);
+            rep.log(format!("attempt {n}: delivery unconfirmed; session closed, not retried"));
             AttemptResult::DeliveryUnconfirmed
         }
     }

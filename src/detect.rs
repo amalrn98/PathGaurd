@@ -48,6 +48,12 @@ pub enum FindingKind {
     TimingAnomaly,
     /// A canary token was touched.
     CanaryTriggered,
+    /// The receiver rejected the payload message (for example AEAD authentication failed).
+    PayloadRejected,
+    /// The payload acknowledgement had an invalid MAC or could not be parsed.
+    PayloadAckInvalid,
+    /// No acknowledgement arrived for the payload.
+    PayloadUnacknowledged,
     /// The canary source could not be reached, or its answer was not authentic.
     CanarySourceFailure,
 }

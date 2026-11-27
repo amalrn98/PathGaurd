@@ -27,7 +27,7 @@ Run `cargo run --release -- matrix` for the current simulated results. They are 
 
 ## Scenario expectations
 
-Each row is asserted in `tests/scenarios.rs`.
+Each row is asserted in `tests/scenarios.rs`. The response-attack rows are additionally asserted by finding kind and stage in `tests/failure_classification.rs`, and the payload row in `tests/toctou.rs`, so a scenario that fails at the wrong check fails its test.
 
 | Scenario | Expected outcome and why |
 |---|---|
@@ -38,7 +38,11 @@ Each row is asserted in `tests/scenarios.rs`.
 | mitm-one-path | Delivered after a retry on another path. |
 | tamper-primary | `baseline` sends a modified payload, the receiver rejects it, delivery is unconfirmed. Probing policies detect tampering first and never send. |
 | tamper-secondary | Delivered. Only `paranoid` looks at secondary paths and records an alert. |
-| forged-replies | Handshake corruption on the primary triggers a retry on a clean path. |
+| tampered-hello-ack | Fails at the **handshake** (`HandshakeFailure`, receiver signature invalid). No probe is sent on that path. Next attempt uses a clean path. |
+| forged-reply-mac | Handshake succeeds; fails at **ProbeReply MAC verification** (`ReplyAuthFailure`). |
+| replayed-reply | A stale reply with an authentic MAC but for another probe. Fails at **probe binding** (`MalformedReply`, "different probe"), before the MAC is even checked. |
+| rewritten-reply-ids | The stale reply relabelled with the current probe's ids. The MAC covers the ids, so it fails at **MAC verification** (`ReplyAuthFailure`). This is the "authentic but incorrect response" case. |
+| payload-only-tamper | All probes verify, then only the payload is modified. The receiver's AEAD check rejects it (`PayloadRejected`). Nothing is delivered, the session is closed, no automatic retry. Same result under every policy. |
 | duplicate-replies | `balanced` retries on another path. `paranoid` excludes the noisy secondary and alerts. |
 | snooping-primary | `paranoid` withholds on every attempt because a bait token was touched (session-level). `balanced` moves to another path and delivers. |
 | snooping-secondary | Only policies that probe secondary paths notice. `paranoid` withholds. |

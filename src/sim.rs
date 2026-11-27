@@ -9,7 +9,7 @@ use crate::canary::{self, Honeypot};
 use crate::clock::ManualClock;
 use crate::crypto::{sha256, Ephemeral, Identity, PublicIdentity};
 use crate::handshake::{ack_input, hello_input};
-use crate::message::{Message, TAG_PAYLOAD, TAG_PROBE};
+use crate::message::{Message, TAG_HELLO, TAG_PAYLOAD, TAG_PROBE};
 use crate::path::{Path, PathError, PathResponse};
 use crate::policy::Policy;
 use crate::receiver::Receiver;
@@ -44,8 +44,22 @@ pub enum Behavior {
     },
     /// Flips a bit in probes and payloads before they reach the receiver.
     TamperProbes,
-    /// Flips a bit in every response.
-    TamperResponses,
+    /// Flips a bit in the payload message only. Hello and probes pass untouched, so every
+    /// verification probe succeeds before the payload is modified (time-of-check to
+    /// time-of-use attack).
+    TamperPayloadOnly,
+    /// Corrupts the HelloAck (a bit flipped in its signature) and nothing else.
+    TamperHelloAck,
+    /// Flips a bit in the MAC of every ProbeReply. The handshake is untouched, so the
+    /// sender reaches ProbeReply verification.
+    ForgeReplyMac,
+    /// Answers each probe after the first with the previous genuine reply, unchanged. Its MAC is
+    /// authentic, but it belongs to a different probe.
+    ReplayOldReply,
+    /// Like `ReplayOldReply`, but relabels the stale reply with the current probe's id and
+    /// sequence number, keeping its old MAC. The reply now claims to answer this probe while
+    /// being authentic for another.
+    RewriteReplyIds,
     /// Duplicates probe replies.
     DuplicateReplies,
     /// Answers the handshake itself with an attacker identity (man in the middle).
@@ -78,6 +92,7 @@ pub struct SimPath {
     toucher: Arc<Mutex<Option<Toucher>>>,
     capture: Capture,
     probe_msgs: u32,
+    last_reply: Option<Vec<u8>>,
 }
 
 impl SimPath {
@@ -145,19 +160,56 @@ impl Path for SimPath {
                 }
             }
             Behavior::Impersonate(att) => return Ok(self.impersonate(att, req)),
-            Behavior::Honest | Behavior::TamperResponses | Behavior::DuplicateReplies => {}
+            Behavior::TamperPayloadOnly => {
+                if tag == Some(TAG_PAYLOAD) {
+                    if let Some(l) = forwarded.last_mut() {
+                        *l ^= 1;
+                    }
+                }
+            }
+            Behavior::Honest
+            | Behavior::TamperHelloAck
+            | Behavior::ForgeReplyMac
+            | Behavior::ReplayOldReply
+            | Behavior::RewriteReplyIds
+            | Behavior::DuplicateReplies => {}
         }
         let mut reply = self.receiver.lock().map_err(|_| PathError::Closed)?.handle(&forwarded);
+        let genuine = reply.clone();
         let replies = match &self.behavior {
-            Behavior::TamperResponses => {
+            Behavior::TamperHelloAck if tag == Some(TAG_HELLO) => {
                 if let Some(l) = reply.last_mut() {
                     *l ^= 1;
                 }
                 vec![reply]
             }
+            Behavior::ForgeReplyMac if tag == Some(TAG_PROBE) => match Message::decode(&reply) {
+                Ok(Message::ProbeReply { session_id, probe_id, seq, mut mac }) => {
+                    mac[0] ^= 1;
+                    vec![Message::ProbeReply { session_id, probe_id, seq, mac }.encode()]
+                }
+                _ => vec![reply],
+            },
+            Behavior::ReplayOldReply if tag == Some(TAG_PROBE) => vec![self.last_reply.clone().unwrap_or(reply)],
+            Behavior::RewriteReplyIds if tag == Some(TAG_PROBE) => {
+                let current = Message::decode(req);
+                let stale = self.last_reply.as_deref().map(Message::decode);
+                match (current, stale) {
+                    (
+                        Ok(Message::Probe { probe_id, seq, .. }),
+                        Some(Ok(Message::ProbeReply { session_id, mac, .. })),
+                    ) => {
+                        vec![Message::ProbeReply { session_id, probe_id, seq, mac }.encode()]
+                    }
+                    _ => vec![reply],
+                }
+            }
             Behavior::DuplicateReplies if tag == Some(TAG_PROBE) => vec![reply.clone(), reply],
             _ => vec![reply],
         };
+        if tag == Some(TAG_PROBE) {
+            self.last_reply = Some(genuine);
+        }
         Ok(PathResponse { replies, rtt: Duration::from_secs_f64(rtt_ms / 1000.0) })
     }
 }
@@ -248,6 +300,7 @@ impl World {
             toucher: self.toucher.clone(),
             capture: self.capture.clone(),
             probe_msgs: 0,
+            last_reply: None,
         })
     }
     /// A faithful path.
@@ -329,9 +382,29 @@ pub fn scenarios() -> Vec<Scenario> {
             build: |w| three(w, Honest, TamperProbes, Honest),
         },
         Scenario {
-            name: "forged-replies",
-            description: "primary corrupts replies on the way back",
-            build: |w| three(w, TamperResponses, Honest, Honest),
+            name: "tampered-hello-ack",
+            description: "primary corrupts only the HelloAck signature; fails at the handshake, before any probe",
+            build: |w| three(w, TamperHelloAck, Honest, Honest),
+        },
+        Scenario {
+            name: "forged-reply-mac",
+            description: "primary flips a bit in each ProbeReply MAC; fails at ProbeReply authentication",
+            build: |w| three(w, ForgeReplyMac, Honest, Honest),
+        },
+        Scenario {
+            name: "replayed-reply",
+            description: "primary answers with a stale reply: authentic MAC, but for a different probe",
+            build: |w| three(w, ReplayOldReply, Honest, Honest),
+        },
+        Scenario {
+            name: "rewritten-reply-ids",
+            description: "primary relabels a stale reply with the current probe's ids; the MAC no longer matches",
+            build: |w| three(w, RewriteReplyIds, Honest, Honest),
+        },
+        Scenario {
+            name: "payload-only-tamper",
+            description: "every probe passes, then only the payload is modified (time-of-check to time-of-use)",
+            build: |w| three(w, TamperPayloadOnly, Honest, Honest),
         },
         Scenario {
             name: "duplicate-replies",

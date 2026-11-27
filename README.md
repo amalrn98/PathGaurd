@@ -78,7 +78,11 @@ mitm-all-paths           no-auth x3     no-auth x3     no-auth x3
 mitm-one-path            delivered x2*  delivered x2*  delivered x2* 
 tamper-primary           unconfirmed    delivered x2*  delivered x2* 
 tamper-secondary         delivered      delivered      delivered*    
-forged-replies           delivered x2*  delivered x2*  delivered x2* 
+tampered-hello-ack       delivered x2*  delivered x2*  delivered x2* 
+forged-reply-mac         delivered      delivered x2*  delivered x2* 
+replayed-reply           delivered      delivered x2*  delivered x2* 
+rewritten-reply-ids      delivered      delivered x2*  delivered x2* 
+payload-only-tamper      unconfirmed    unconfirmed    unconfirmed   
 duplicate-replies        delivered      delivered x2*  delivered x2* 
 snooping-primary         delivered      delivered x2*  withheld x3   
 snooping-secondary       delivered      delivered      withheld x3   
@@ -95,6 +99,7 @@ How to read it:
 * `mitm-all-paths`: an attacker that impersonates the receiver is never accepted, under any policy. This is the cryptographic handshake doing its job.
 * `tamper-primary`: with `baseline` the tampered payload is sent and rejected by the receiver. With probing it is never sent, and a clean path is used on the next attempt.
 * `passive-relay`: delivered under every policy. A relay that forwards everything verbatim cannot be told apart from a slow honest path. The attacker still learns nothing, because only the authenticated receiver holds the keys. This is a documented, expected result, not a bug.
+* `payload-only-tamper`: every probe passes, then only the payload is modified. Probes cannot protect the payload; the AEAD tag does. The receiver rejects it, nothing reaches the application, and the sender invalidates the session without retrying. See [Threat model](docs/THREAT_MODEL.md).
 * `shared-infrastructure`: three paths that share the same hops fail the diversity requirement of `paranoid`.
 
 Walk through one scenario with the full audit trail:

@@ -114,6 +114,8 @@ for attempt in 0..=max_retries:
 
 If the payload was sent but no valid ack arrives, the sender stops and reports `DeliveryUnconfirmed`. It does not retry, because the receiver may already hold the data.
 
+**Payload failures.** After release, a missing or invalid acknowledgement, or a `Reject`, is recorded as `PayloadUnacknowledged`, `PayloadAckInvalid` or `PayloadRejected`. The sender then sends an authenticated `Close`, drops the session, and returns `DeliveryUnconfirmed` without retrying. A `Reject` is unauthenticated and is never treated as proof that the receiver did not keep the payload.
+
 ## 9. Decision rules
 
 Findings carry a severity: Low 0.25, Medium 0.5, Critical 100.

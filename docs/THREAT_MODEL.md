@@ -43,6 +43,19 @@ Out of scope: compromise of either endpoint, theft of private keys, denial of se
 
 A relay forwards the handshake and every probe unchanged. All MACs verify, because the real receiver produced them. PathGuard cannot, and does not claim to, detect this. The relay still cannot read or alter the payload: it has no ephemeral secret, so it cannot derive the session keys. The only observable effect is extra latency, which is indistinguishable from a slow route. The scenario `passive-relay` encodes this expectation and its test asserts both facts.
 
+## Time of check, time of use
+
+Verification and release are separate steps, so a path that passed every probe can still change behaviour before the payload crosses it. An attacker who behaves honestly toward probes and modifies only the payload defeats the *detection* layer completely. That is expected: probes never protected the payload.
+
+The protection is cryptographic and independent of verification. The payload is sealed with ChaCha20-Poly1305 under a key only the authenticated receiver holds, with the session id, receiver identity and sequence number as associated data. Any modification, in any bit of ciphertext or tag, fails authentication at the receiver (`tests/toctou.rs` flips every bit of a ciphertext). The receiver delivers nothing and answers `Reject(AuthFailed)`.
+
+What PathGuard does about it, by policy:
+
+* **Classification:** the sender records `PayloadRejected` (Critical) against the path.
+* **Session:** invalidated. The sender closes it and drops the keys. The receiver also does not burn the sequence number on a failed authentication, so forged ciphertexts cannot make it reject the real one.
+* **No automatic retry.** A `Reject` is unauthenticated: an attacker can forge one after dropping a genuine acknowledgement, which would otherwise trick the sender into resending data the receiver already holds. The result is `DeliveryUnconfirmed`, and the application decides whether to resend.
+* **Residual exposure:** the attacker can still deny service on that path. Confidentiality and integrity hold.
+
 ## Route changes
 
 A new route with correct authentication is not an attack. PathGuard never treats a changed path, hop list or latency baseline as compromise on its own. Hop changes only matter for the diversity requirement.
