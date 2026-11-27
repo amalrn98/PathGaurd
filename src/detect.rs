@@ -48,6 +48,8 @@ pub enum FindingKind {
     TimingAnomaly,
     /// A canary token was touched.
     CanaryTriggered,
+    /// The canary source could not be reached, or its answer was not authentic.
+    CanarySourceFailure,
 }
 
 /// One observation.

@@ -25,6 +25,11 @@ pub const PAYLOAD: &[u8] = b"top secret: launch codes 0000";
 /// Shared log of everything an on-path observer saw in requests.
 pub type Capture = Arc<Mutex<Vec<Vec<u8>>>>;
 
+/// What a snooping path does with a canary token it read. By default it touches
+/// the in-process honeypot; tests can replace it, for example to hit a real
+/// canary service over HTTP.
+pub type Toucher = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
 /// What a simulated path does to traffic.
 #[derive(Clone)]
 pub enum Behavior {
@@ -70,6 +75,7 @@ pub struct SimPath {
     rng: StdRng,
     base_ms: f64,
     honeypot: Honeypot,
+    toucher: Arc<Mutex<Option<Toucher>>>,
     capture: Capture,
     probe_msgs: u32,
 }
@@ -123,8 +129,13 @@ impl Path for SimPath {
                 }
             }
             Behavior::Snoop => {
+                let custom = self.toucher.lock().ok().and_then(|g| g.clone());
                 for t in canary::scan(req) {
-                    self.honeypot.touch(&t, &format!("snooper on path {}", self.id));
+                    let source = format!("snooper on path {}", self.id);
+                    match &custom {
+                        Some(f) => f(&t, &source),
+                        None => self.honeypot.touch(&t, &source),
+                    }
                 }
             }
             Behavior::Relay { extra_ms } => rtt_ms += *extra_ms,
@@ -158,6 +169,7 @@ pub struct World {
     sender_seed: [u8; 32],
     clock: ManualClock,
     honeypot: Honeypot,
+    toucher: Arc<Mutex<Option<Toucher>>>,
     capture: Capture,
 }
 
@@ -181,6 +193,7 @@ impl World {
             sender_seed: sender_id.seed_bytes(),
             clock,
             honeypot: Honeypot::new(),
+            toucher: Arc::new(Mutex::new(None)),
             capture: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -193,6 +206,30 @@ impl World {
     /// The shared simulated clock. Advance it to test expiry.
     pub fn clock(&self) -> &ManualClock {
         &self.clock
+    }
+    /// The in-process honeypot shared by this world's senders and snooping paths.
+    pub fn honeypot(&self) -> Honeypot {
+        self.honeypot.clone()
+    }
+    /// Make snooping paths report through `f` instead of the in-process honeypot.
+    pub fn set_toucher(&self, f: Toucher) {
+        if let Ok(mut g) = self.toucher.lock() {
+            *g = Some(f);
+        }
+    }
+    /// Every canary token visible in plaintext to on-path observers so far.
+    pub fn observed_canary_tokens(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        if let Ok(c) = self.capture.lock() {
+            for m in c.iter() {
+                for t in canary::scan(m) {
+                    if !out.contains(&t) {
+                        out.push(t);
+                    }
+                }
+            }
+        }
+        out
     }
     /// Receiver identity.
     pub fn recipient(&self) -> PublicIdentity {
@@ -208,6 +245,7 @@ impl World {
             rng: StdRng::seed_from_u64(seed),
             base_ms: 20.0,
             honeypot: self.honeypot.clone(),
+            toucher: self.toucher.clone(),
             capture: self.capture.clone(),
             probe_msgs: 0,
         })

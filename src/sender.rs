@@ -5,7 +5,7 @@
 //! A withheld attempt tears the session down and the next attempt performs a
 //! fresh handshake with new ephemeral keys, starting from the next path.
 
-use crate::canary::{CanaryIssuer, Honeypot};
+use crate::canary::{CanaryError, CanaryIssuer, CanarySource, Honeypot};
 use crate::clock::{Clock, SystemClock};
 use crate::crypto::{self, derive_session_keys, sha256, Ephemeral, Identity, PublicIdentity, SessionKeys};
 use crate::detect::{score, summarize, Detector, Finding, FindingKind, Severity};
@@ -19,9 +19,9 @@ use crate::receiver::{ack_mac, close_mac, decoy_nonce, payload_aad, reply_mac};
 use crate::util;
 use rand::rngs::SysRng;
 use rand::TryRng;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use zeroize::Zeroize;
 
 pub use crate::limits::MAX_PAYLOAD_BYTES as MAX_PAYLOAD;
@@ -41,6 +41,18 @@ pub struct PathReport {
     pub excluded: bool,
     /// Mean round-trip time of valid probes in milliseconds.
     pub mean_rtt_ms: f64,
+}
+
+/// Whether the canary source gave a trustworthy answer during a send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanaryStatus {
+    /// No canary or active-decoy mechanism was enabled.
+    NotUsed,
+    /// The source answered and the answer was authentic. "No events" is then meaningful.
+    Checked,
+    /// The source did not answer, or its answer was not trusted. Absence of events
+    /// must **not** be read as a clean path.
+    Unchecked,
 }
 
 /// Outcome and audit trail of `send`.
@@ -66,6 +78,8 @@ pub struct SendReport {
     pub diversity: Option<f64>,
     /// Reasons the last decision withheld the payload.
     pub reasons: Vec<String>,
+    /// Whether canary events could actually be observed.
+    pub canary_status: CanaryStatus,
     /// Chronological audit log.
     pub audit: Vec<String>,
 }
@@ -83,6 +97,7 @@ impl SendReport {
             paths: Vec::new(),
             diversity: None,
             reasons: Vec::new(),
+            canary_status: CanaryStatus::NotUsed,
             audit: Vec::new(),
         }
     }
@@ -105,6 +120,7 @@ impl SendReport {
         if let Some(d) = self.diversity {
             s.push_str(&format!("  min pairwise path diversity: {d:.2}\n"));
         }
+        s.push_str(&format!("  canary source: {:?}\n", self.canary_status));
         for (f, n) in summarize(&self.findings) {
             if n > 1 {
                 s.push_str(&format!("  finding (x{n}) {f}\n"));
@@ -180,8 +196,53 @@ enum AttemptResult {
     DeliveryUnconfirmed,
 }
 
+/// A canary touch observed after the payload was released.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LateCanaryEvent {
+    /// Session that carried the token.
+    pub session_id: SessionId,
+    /// The token that was touched.
+    pub token: String,
+    /// What the token was attached to (`probe` or `bait`).
+    pub label: String,
+    /// Where the touch came from, as reported by the source.
+    pub source: String,
+}
+
+const REGISTRY_SESSIONS: usize = 256;
+
+#[derive(Default)]
+struct Registry {
+    order: VecDeque<SessionId>,
+    tokens: HashMap<SessionId, HashMap<String, String>>,
+    reported: HashSet<String>,
+    compromised: Vec<SessionId>,
+}
+
+impl Registry {
+    fn remember(&mut self, id: SessionId, tokens: HashMap<String, String>) {
+        if tokens.is_empty() {
+            return;
+        }
+        if self.tokens.insert(id, tokens).is_none() {
+            self.order.push_back(id);
+        }
+        while self.order.len() > REGISTRY_SESSIONS {
+            if let Some(old) = self.order.pop_front() {
+                if let Some(t) = self.tokens.remove(&old) {
+                    for k in t.keys() {
+                        self.reported.remove(k);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Sender endpoint.
 pub struct Sender {
+    canary: Arc<dyn CanarySource>,
+    registry: Mutex<Registry>,
     clock: Arc<dyn Clock>,
     identity: Identity,
     recipient: PublicIdentity,
@@ -192,7 +253,16 @@ pub struct Sender {
 impl Sender {
     /// New sender pinned to one receiver identity.
     pub fn new(identity: Identity, recipient: PublicIdentity, policy: Policy) -> Self {
-        Self { clock: Arc::new(SystemClock), identity, recipient, policy, honeypot: Honeypot::new() }
+        let honeypot = Honeypot::new();
+        Self {
+            canary: Arc::new(honeypot.clone()),
+            registry: Mutex::new(Registry::default()),
+            clock: Arc::new(SystemClock),
+            identity,
+            recipient,
+            policy,
+            honeypot,
+        }
     }
     /// Use a specific clock (tests and simulation).
     pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
@@ -201,8 +271,51 @@ impl Sender {
     }
     /// Use an existing honeypot, so the thing that watches your bait and this sender share one log.
     pub fn with_honeypot(mut self, honeypot: Honeypot) -> Self {
+        self.canary = Arc::new(honeypot.clone());
         self.honeypot = honeypot;
         self
+    }
+    /// Observe canaries through another source, for example a remote canary service.
+    pub fn with_canary_source(mut self, source: Arc<dyn CanarySource>) -> Self {
+        self.canary = source;
+        self
+    }
+    /// Collect canary touches that happened **after** release, for every session this
+    /// sender still remembers (the most recent 256).
+    ///
+    /// Policy: a late touch cannot undo a delivery. It marks the session
+    /// compromised (see [`Sender::compromised_sessions`]) and is returned here once
+    /// so the application can start incident response. Sessions are single-use, so
+    /// no later `send` ever reuses a compromised session's keys.
+    pub fn collect_late_events(&self) -> Result<Vec<LateCanaryEvent>, CanaryError> {
+        let all: HashSet<String> = {
+            let reg = self.registry.lock().map_err(|_| CanaryError::Unavailable("registry poisoned".into()))?;
+            reg.tokens.values().flat_map(|t| t.keys().cloned()).collect()
+        };
+        if all.is_empty() {
+            return Ok(Vec::new());
+        }
+        let hits = self.canary.poll(&all)?;
+        let mut reg = self.registry.lock().map_err(|_| CanaryError::Unavailable("registry poisoned".into()))?;
+        let mut out = Vec::new();
+        for hit in hits {
+            if reg.reported.contains(&hit.token) {
+                continue;
+            }
+            let found = reg.tokens.iter().find_map(|(sid, t)| t.get(&hit.token).map(|label| (*sid, label.clone())));
+            if let Some((session_id, label)) = found {
+                reg.reported.insert(hit.token.clone());
+                if !reg.compromised.contains(&session_id) {
+                    reg.compromised.push(session_id);
+                }
+                out.push(LateCanaryEvent { session_id, token: hit.token, label, source: hit.source });
+            }
+        }
+        Ok(out)
+    }
+    /// Sessions in which a canary was touched.
+    pub fn compromised_sessions(&self) -> Vec<SessionId> {
+        self.registry.lock().map(|r| r.compromised.clone()).unwrap_or_default()
     }
     /// Shared honeypot handle. Whatever watches your bait must call `touch` on it.
     pub fn honeypot(&self) -> Honeypot {
@@ -518,25 +631,48 @@ impl Sender {
         let _ = path.exchange(&Message::Close { session_id: session.id, mac: tag }.encode());
     }
 
-    fn poll_honeypot(&self, issuer: &CanaryIssuer) -> Vec<Finding> {
+    fn canary_enabled(&self) -> bool {
         let m = &self.policy.mechanisms;
-        if !(m.canary || m.active_decoys) {
-            return Vec::new();
+        m.canary || m.active_decoys
+    }
+
+    /// Ask the canary source about this session's tokens only. Returns findings and
+    /// whether the answer can be trusted.
+    fn poll_canaries(&self, issuer: &CanaryIssuer) -> (Vec<Finding>, bool) {
+        if !self.canary_enabled() {
+            return (Vec::new(), true);
         }
-        self.honeypot
-            .drain()
-            .into_iter()
-            .filter_map(|hit| {
-                issuer.label_of(&hit.token).map(|label| {
-                    Finding::new(
-                        FindingKind::CanaryTriggered,
-                        Severity::Critical,
-                        "session",
-                        format!("{label} token touched by {}", hit.source),
-                    )
-                })
-            })
-            .collect()
+        let mine: HashSet<String> = issuer.issued().keys().cloned().collect();
+        match self.canary.poll(&mine) {
+            Ok(hits) => {
+                let findings = hits
+                    .into_iter()
+                    .filter_map(|hit| {
+                        issuer.label_of(&hit.token).map(|label| {
+                            Finding::new(
+                                FindingKind::CanaryTriggered,
+                                Severity::Critical,
+                                "session",
+                                format!("{label} token {} touched by {}", hit.token, hit.source),
+                            )
+                        })
+                    })
+                    .collect();
+                (findings, true)
+            }
+            Err(e) => (vec![self.canary_failure(&e)], false),
+        }
+    }
+
+    fn canary_failure(&self, e: &CanaryError) -> Finding {
+        // A bad signature is evidence of tampering. An outage is only blindness, which
+        // becomes blocking when the policy requires canary visibility.
+        let severity = match e {
+            CanaryError::Untrusted(_) => Severity::Critical,
+            CanaryError::Unavailable(_) if self.policy.verification.canary_required => Severity::Critical,
+            CanaryError::Unavailable(_) => Severity::Medium,
+        };
+        Finding::new(FindingKind::CanarySourceFailure, severity, "session", e.to_string())
     }
 
     fn attempt(
@@ -567,8 +703,19 @@ impl Sender {
         let mut reports: Vec<PathReport> = Vec::new();
         let mut hops: Vec<Vec<String>> = Vec::new();
         let mut findings: Vec<Finding> = Vec::new();
+        let mut canary_ok = true;
         if !kinds.is_empty() {
             let targets: Vec<usize> = if self.policy.mechanisms.multipath { order.to_vec() } else { vec![primary] };
+            if self.canary_enabled() {
+                // Register before any bait leaves, so an external service can ignore
+                // tokens nobody asked it to watch.
+                let planned = targets.len() * self.policy.verification.probes_per_path as usize;
+                if let Err(e) = self.canary.register(&issuer.preview(planned)) {
+                    canary_ok = false;
+                    findings.push(self.canary_failure(&e));
+                    rep.log(format!("attempt {n}: canary registration failed: {e}"));
+                }
+            }
             for pi in targets {
                 let (pr, fs) = self.probe_path(&mut *paths[pi], &mut session, &kinds, &mut issuer, det);
                 rep.log(format!(
@@ -585,7 +732,16 @@ impl Sender {
         } else {
             rep.log(format!("attempt {n}: no verification mechanisms enabled"));
         }
-        findings.extend(self.poll_honeypot(&issuer));
+        if let Ok(mut reg) = self.registry.lock() {
+            reg.remember(session.id, issuer.issued().clone());
+        }
+        let (cf, polled_ok) = self.poll_canaries(&issuer);
+        findings.extend(cf);
+        rep.canary_status = match (self.canary_enabled(), canary_ok && polled_ok) {
+            (false, _) => CanaryStatus::NotUsed,
+            (true, true) => CanaryStatus::Checked,
+            (true, false) => CanaryStatus::Unchecked,
+        };
 
         let decision = self.decide(&primary_id, &mut reports, &hops, &findings);
         rep.score = decision.score;
@@ -633,8 +789,8 @@ impl Sender {
                 .unwrap_or(false),
             Err(_) => false,
         };
-        let late = self.poll_honeypot(&issuer);
-        for f in late {
+        let (late, _) = self.poll_canaries(&issuer);
+        for f in late.into_iter().filter(|f| f.kind == FindingKind::CanaryTriggered) {
             rep.log(format!("attempt {n}: canary triggered after release (session may be exposed): {f}"));
             rep.findings.push(f);
         }

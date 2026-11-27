@@ -50,6 +50,9 @@ pub struct Verification {
     pub payload_like_len: u32,
     /// Let a failing secondary path be excluded instead of blocking release.
     pub tolerate_failed_secondary_paths: bool,
+    /// Withhold when canary events cannot be observed (source down or untrusted).
+    /// Without this, an outage only lowers confidence and is reported as such.
+    pub canary_required: bool,
 }
 
 impl Default for Verification {
@@ -62,6 +65,7 @@ impl Default for Verification {
             max_rtt_zscore: 4.0,
             payload_like_len: 256,
             tolerate_failed_secondary_paths: false,
+            canary_required: false,
         }
     }
 }
@@ -142,6 +146,7 @@ impl Policy {
                 probes_per_path: 4,
                 min_verified_paths: 2,
                 tolerate_failed_secondary_paths: true,
+                canary_required: true,
                 ..Verification::default()
             },
             failure: Failure::default(),

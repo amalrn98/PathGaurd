@@ -15,6 +15,7 @@ max_suspicion_score = 1.0
 max_rtt_zscore = 4.0
 payload_like_len = 256
 tolerate_failed_secondary_paths = false
+canary_required = false
 
 [failure]
 max_retries = 2
