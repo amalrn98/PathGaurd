@@ -9,6 +9,7 @@
 //! detection signals on top of them. They are not a substitute.
 //!
 //! **Status: research prototype. Not audited. Do not use to protect real secrets.**
+//! See "Status and maturity" in the README for what that means and what would change it.
 //!
 //! ```
 //! use pathguard::sim::{self, World};

@@ -13,7 +13,7 @@ An experimental, open-source, decoy-assisted and authenticated data transmission
 
 </div>
 
-> **Research prototype. Not audited. Do not use it to protect real secrets.**
+> **Research prototype. Not audited. Do not use it to protect real secrets.** What that label means, and what would change it, is in [Status and maturity](#status-and-maturity).
 > The cryptographic guarantees come from standard primitives (Ed25519, X25519, HKDF, ChaCha20-Poly1305). The decoy, canary and multi-path layers add detection signals and have **not** been shown to add real-world security. Measuring whether they do is the point of this project. See [Limitations](#limitations).
 
 ## The idea
@@ -152,6 +152,26 @@ close_session_on_failure = true
 ```
 
 Presets live in [`policies/`](policies/). Unknown keys are rejected, values are validated, and every decision is written to an audit log.
+
+## Status and maturity
+
+PathGuard is a **research prototype** (version 0.1.x). The wire format and the API will change without notice.
+
+| Status | What earns it | Where PathGuard is |
+|---|---|---|
+| **Research prototype** | Working reference implementation, tests, documented limits | **Here** |
+| Alpha | Real transports (UDP or QUIC). Long coverage-guided fuzz runs. First real-network measurements with false-positive rates. A formal model of the handshake. | Not yet |
+| Beta | Independent protocol and code review. A versioned, stable wire format. | Not yet |
+| Stable | A completed external audit and published fixes for its findings. | Not yet |
+
+What is missing today, concretely:
+
+* No one outside this project has reviewed the protocol or the code.
+* All detection results come from a simulator. None are measured on real networks, and the false-positive rate is unknown.
+* Coverage-guided fuzzing has only run briefly.
+* There is no real network transport yet.
+
+The status moves up only when the evidence in the second column exists, not when the code feels ready. See the [roadmap](docs/ROADMAP.md) for the work that gets there.
 
 ## Limitations
 

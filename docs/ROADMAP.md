@@ -11,11 +11,21 @@ Phases follow the original [proposal](PROPOSAL.md).
 | 5 | Configurable policy, incident logging, automated revalidation | Policy and audit log done. Structured logs and OpenTelemetry pending |
 | 6 | Independent evaluation, pen test, relay and replay testing, FP/FN rates, audits | Not started |
 
+## Maturity levels
+
+The project status is tracked by evidence, not by feel. The criteria are the same as in the [README](../README.md#status-and-maturity):
+
+* **Research prototype (current):** reference implementation, tests, documented limits.
+* **Alpha:** real transports, long fuzz runs, real-network measurements with false-positive rates, a formal handshake model.
+* **Beta:** independent protocol and code review, a versioned and stable wire format.
+* **Stable:** a completed external audit and published fixes for its findings.
+
 ## Next up
 
 - [ ] Real transports: UDP and QUIC `Path` implementations, plus a `pathguard-recv` daemon
-- [ ] Receiver session expiry and eviction
-- [ ] `cargo-fuzz` targets for `Message::decode` and `Receiver::handle`
+- [x] Receiver session expiry, caps and rate limits (session lifetime, per-sender caps, handshake rate limit)
+- [x] `cargo-fuzz` targets for the decoder, receiver, policy parser and canary service (scheduled in CI)
+- [ ] Long coverage-guided fuzz runs and triage of results
 - [ ] Traffic padding and timing obfuscation options
 - [ ] Network namespace test bench with `tc netem`
 - [ ] Structured audit output (JSON) and OpenTelemetry export
