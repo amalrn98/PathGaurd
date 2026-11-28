@@ -1,0 +1,49 @@
+[package]
+name = "pathguard-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pathguard = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "message_decode"
+path = "fuzz_targets/message_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "receiver_handle"
+path = "fuzz_targets/receiver_handle.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "policy_toml"
+path = "fuzz_targets/policy_toml.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "canary_service_request"
+path = "fuzz_targets/canary_service_request.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "canary_scan"
+path = "fuzz_targets/canary_scan.rs"
+test = false
+doc = false
+bench = false

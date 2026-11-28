@@ -1,0 +1,7 @@
+POST /register HTTP/1.1
+Content-Length: 40
+
+nonce 00
+now 1
+token pg-canary-0123456789abcdef01234567
+tag 00

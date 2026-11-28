@@ -32,6 +32,9 @@ serde = { version = "1", features = ["derive"] }
 toml = "1.2"
 thiserror = "2"
 
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+
 [profile.release]
 lto = true
 codegen-units = 1

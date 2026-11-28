@@ -1,0 +1,3 @@
+GET /c/pg-canary-0123456789abcdef01234567 HTTP/1.1
+Host: x
+

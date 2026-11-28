@@ -1,0 +1,2 @@
+GET /events?nonce=00112233445566778899aabbccddeeff&tokens=pg-canary-0123456789abcdef01234567 HTTP/1.1
+
