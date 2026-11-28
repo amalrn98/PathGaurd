@@ -196,6 +196,8 @@ policies/        example policies
 * [Threat model](docs/THREAT_MODEL.md)
 * [Architecture](docs/ARCHITECTURE.md)
 * [Evaluation plan and current results](docs/EVALUATION.md)
+* [Testing and fuzzing](docs/TESTING.md)
+* [CI and branch protection](docs/CI.md)
 * [Roadmap](docs/ROADMAP.md)
 * [Original proposal](docs/PROPOSAL.md)
 

@@ -26,7 +26,10 @@ cargo run -- matrix
 cargo fmt --all
 cargo clippy --all-targets -- -D warnings
 cargo test
+./scripts/check-pinned-actions.sh   # if you touched .github/workflows
 ```
+
+See [docs/TESTING.md](docs/TESTING.md) for property tests and fuzzing, and [docs/CI.md](docs/CI.md) for what CI enforces. Workflow actions must be pinned to full commit SHAs.
 
 CI runs the same checks. Please also:
 

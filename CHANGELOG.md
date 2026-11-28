@@ -12,6 +12,8 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Canary events are session-scoped: polling removes only the polling session's hits, so concurrent senders no longer consume each other's events. Late touches are collected with `collect_late_events` and mark the session compromised (#11).
 - Separately deployable canary service (`pathguard canary-serve`) with authenticated registration and signed answers, plus `RemoteCanary`. Outages are reported as `Unchecked`, never as clean; `canary_required` makes them blocking (#13).
 - Simulator splits response attacks into `tampered-hello-ack`, `forged-reply-mac`, `replayed-reply`, `rewritten-reply-ids` and `duplicate-replies`, each asserted to fail at its own check (#12). Adds `payload-only-tamper` and payload-failure classification (`PayloadRejected`, `PayloadAckInvalid`, `PayloadUnacknowledged`); a failed payload invalidates the session without automatic retry (#14).
+- Property-based tests (including a receiver state-machine model), a deterministic mutation fuzzer with allocation tracking, and `cargo-fuzz` targets with a scheduled fuzz workflow (#16).
+- CI: actions pinned to commit SHAs with a check that enforces it, MSRV 1.88 and stable, `ci-success` aggregate check, fuzz targets build check, documented branch protection recommendations (#17).
 
 ### Added
 
